@@ -33,11 +33,11 @@ def inspect_data(start, end):
 def testing_data(start, end, num_core, threshold):
     score_chunks = split_chunks_and_calculate_score(num_core, data, start, end, vectorizer, entropy)
     score = pd.DataFrame(score_chunks)
-    p = px.line(score, x='timestamp', y='score')
+    p = px.line(score, x='timestamp', y='score', width=800, height=500)
     anomaly = score[score['score'] >= threshold]
     testing = {k: v[(v['timestamp'] >= start) & (v['timestamp'] < end)] for k, v in data.items()}['message']
     grouped = testing.groupby(pd.Grouper(key='timestamp', axis=0, freq='H')).count()
-    p2 = px.line(grouped)
+    p2 = px.line(grouped, width=800, height=500)
     return p, anomaly, p2
 
 def load_data_log_entity(folder, entity_name, hostname):
