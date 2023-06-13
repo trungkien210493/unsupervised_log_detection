@@ -54,20 +54,26 @@ def load_data_log_entity(folder, entity_name, hostname):
         if 'messages' in filename:
             for line in content.split('\n'):
                 tokens = line.split(hostname)
-                if len(tokens) == 2:
-                    if '<' in tokens[0]:
-                        tokens[0] = tokens[0].split()[1]
-                    data1['timestamp'].append(tokens[0])
-                    data1['message'].append(tokens[1])
+                if "logfile turned over due" in line:
+                    pass
+                else:
+                    if len(tokens) == 2:
+                        if '<' in tokens[0]:
+                            tokens[0] = tokens[0].split()[1]
+                        data1['timestamp'].append(tokens[0])
+                        data1['message'].append(tokens[1])
         else:
             for line in content.split('\n'):
                 tokens = line.split(hostname)
-                if len(tokens) == 2:
-                    if '<' in tokens[0]:
-                        tokens[0] = tokens[0].split()[1]
-                    data1['timestamp'].append(tokens[0])
-                    data1['message'].append(tokens[1])
-        # Parsing data to get time and info - End    
+                if "logfile turned over due" in line:
+                    pass
+                else:
+                    if len(tokens) == 2:
+                        if '<' in tokens[0]:
+                            tokens[0] = tokens[0].split()[1]
+                        data1['timestamp'].append(tokens[0])
+                        data1['message'].append(tokens[1])
+        # Parsing data to get time and info - End
     return pd.DataFrame(data1)
 
 
