@@ -10,6 +10,8 @@ import urllib3
 from functools import partial
 urllib3.disable_warnings()
 import plotly.express as px
+import nltk
+nltk.download('wordnet')
 
 
 data = dict()
