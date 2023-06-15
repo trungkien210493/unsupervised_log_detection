@@ -97,61 +97,64 @@ with demo:
     gr.Markdown(
         r"<h1>Please choose the training period and train model by this data to reuse in test data. Please change the datetime format if the current datetime format does not match with '_message' log file</h1>"
     )
-    with gr.Row():
-        with gr.Column(scale=2):
-            dir_path = gr.Textbox(
-                value=os.path.abspath(os.getcwd()),
-                interactive=True,
-                label="Log directory"
-            )
+    with gr.Row().style(equal_height=True):
         with gr.Column(scale=1):
-            hostname = gr.Textbox(
-                value="",
-                interactive=True,
-                label="Hostname in log file, please check the _message file"
-            )
-    with gr.Row():
-        start_training = gr.Textbox(
-            label="Start training time",
-            interactive=True,
-            value=str(datetime.datetime.now())
-        )
-        end_training = gr.Textbox(
-            label="End training time",
-            interactive=True,
-            value=str(datetime.datetime.now())
-        )
-    output = gr.Textbox(label="Training result")
-    btn1 = gr.Button(value="Train data")
+            with gr.Row():
+                dir_path = gr.Textbox(
+                    value=os.path.abspath(os.getcwd()),
+                    interactive=True,
+                    label="Log directory"
+                )
+                hostname = gr.Textbox(
+                    value="",
+                    interactive=True,
+                    label="Hostname in log file, please check the _message file"
+                )
+            with gr.Row():
+                start_training = gr.Textbox(
+                    label="Start training time",
+                    interactive=True,
+                    value=str(datetime.datetime.now())
+                )
+                end_training = gr.Textbox(
+                    label="End training time",
+                    interactive=True,
+                    value=str(datetime.datetime.now())
+                )
+                btn1 = gr.Button(value="Train data").style(full_width=False)
+            output = gr.Textbox(label="Training result")
+            with gr.Row():
+                num_core = gr.Number(
+                    label="Number CPU core (use more cores to speed up)",
+                    interactive=True,
+                    value=4
+                )
+                threshold = gr.Number(
+                    label="Threshold to consider error",
+                    interactive=True,
+                    value=5
+                )
+            with gr.Row():
+                start_testing = gr.Textbox(
+                    label="Start testing time",
+                    interactive=True,
+                    value=str(datetime.datetime.now())
+                )
+                end_testing = gr.Textbox(
+                    label="End testing time",
+                    interactive=True,
+                    value=str(datetime.datetime.now())
+                )
+                btn2 = gr.Button(value="Check testing data").style(full_width=False)
+        with gr.Column(scale=2):
+            gr.Markdown("<h1>Score</h1>")
+            pl = gr.Plot()
+            gr.Markdown("<h1>Total log count per hour</h1>")
+            pl2 = gr.Plot()
+    # Refactor from here
     btn1.click(fn=training_data, inputs=[dir_path, start_training, end_training, hostname], outputs=output)
-    with gr.Row():
-        start_testing = gr.Textbox(
-            label="Start testing time",
-            interactive=True,
-            value=str(datetime.datetime.now())
-        )
-        end_testing = gr.Textbox(
-            label="End testing time",
-            interactive=True,
-            value=str(datetime.datetime.now())
-        )
-    with gr.Row():
-        num_core = gr.Number(
-            label="Number CPU core (use more cores to speed up)",
-            interactive=True,
-            value=3
-        )
-        threshold = gr.Number(
-            label="Threshold to consider error",
-            interactive=True,
-            value=5
-        )
-    btn2 = gr.Button(value="Check testing data")
-    pl = gr.Plot()
     gr.Markdown("<h1>Possible error</h1>")
     ano = gr.DataFrame()
-    gr.Markdown("<h1>Total log count per hour</h1>")
-    pl2 = gr.Plot()
     btn2.click(fn=testing_data, inputs=[start_testing, end_testing, num_core, threshold], outputs=[pl, ano, pl2])
     gr.Markdown("<h1>Inspect data</h1>")
     with gr.Row():
@@ -165,7 +168,7 @@ with demo:
             interactive=True,
             value=str(datetime.datetime.now())
         )
-    btn3 = gr.Button(value="Inspect data in above interval")
+        btn3 = gr.Button(value="Inspect data in above interval").style(full_width=False)
     raw = gr.DataFrame()
     btn3.click(fn=inspect_data, inputs=[start_inspect, end_inspect], outputs=raw)
     
