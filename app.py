@@ -20,7 +20,8 @@ vectorizer = None
 
 def training_data(folder, start, end, hostname):
     df = load_data_log_entity(folder, 'messages*', hostname)
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+    df = df.dropna(subset=['timestamp'])
     df.sort_values(by=['timestamp'], inplace=True)
     data['message'] = df
     training_data = {k: v[(v['timestamp'] >= start) & (v['timestamp'] < end)] for k, v in data.items()}
