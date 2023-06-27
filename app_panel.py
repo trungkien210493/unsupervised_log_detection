@@ -186,7 +186,7 @@ log_count_chart = alt.Chart(empty_log_count).mark_line().encode(
 
 log_count_panel = pn.pane.Vega(log_count_chart, margin=5)
 error = pn.widgets.Tabulator(sizing_mode="stretch_both", margin=5, page_size=5, pagination='remote')
-show_log = pn.widgets.Tabulator(page_size=5, pagination='remote',styles={"font-size": "10px"}, sizing_mode="stretch_both", margin=5)
+show_log = pn.widgets.Tabulator(styles={"font-size": "10px"}, sizing_mode="stretch_both", margin=5, pagination=None)
 # Ticket tab
 es_connection = {
     "host": "10.98.100.106",
