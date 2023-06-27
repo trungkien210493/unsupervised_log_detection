@@ -15,6 +15,8 @@ pn.extension('vega')
 pn.extension('tabulator')
 alt.data_transformers.disable_max_rows()
 nltk.download('wordnet')
+from elasticsearch import Elasticsearch
+import mysql.connector
 
 
 data = dict()
@@ -114,9 +116,10 @@ def testing_data(start, end):
     return score, grouped, testing
 
 # UI component
+junos_hostname = pn.widgets.TextInput(name="Host name")
 alert = pn.pane.Alert("", width=300)
 path = pn.widgets.TextAreaInput(name='Log path', placeholder='Enter a string here...', value=os.getcwd(), height=100)
-hostname = pn.widgets.TextInput(name='Hostname', placeholder='Enter a string here...')
+hostname = pn.widgets.TextInput(name='Hostname', placeholder='Enter a string here...', value=junos_hostname)
 training_period = pn.widgets.DatetimeRangePicker(name="Training period")
 train_but = pn.widgets.Button(name='Train', sizing_mode='stretch_width')
 testing_period = pn.widgets.DatetimeRangePicker(name="Testing period")
@@ -184,6 +187,48 @@ log_count_chart = alt.Chart(empty_log_count).mark_line().encode(
 log_count_panel = pn.pane.Vega(log_count_chart, margin=5)
 error = pn.widgets.Tabulator(sizing_mode="stretch_both", margin=5, page_size=5, pagination='remote')
 show_log = pn.widgets.Tabulator(page_size=5, pagination='remote',styles={"font-size": "10px"}, sizing_mode="stretch_both", margin=5)
+# Ticket tab
+es_connection = {
+    "host": "10.98.100.106",
+    "port": 9200,
+    "user": "elastic",
+    "password": "juniper@123"
+}
+ticket_db = {
+    "host": "10.98.0.113",
+    "port": 13306,
+    "user": "juniper",
+    "password": "juniper@123"
+}
+def load_index_name(es_connection):
+    es = Elasticsearch(
+        [{"host": es_connection["host"], "port": es_connection["port"]}],
+        http_auth=(es_connection["user"], es_connection["password"]),
+        use_ssl=True, verify_certs=False
+    )
+    return list(es.indices.get_alias(index="*").keys())
+index = pn.widgets.AutocompleteInput(name="Index name", options=load_index_name(es_connection))
+hostname.link(junos_hostname, value='value')
+tag_name = pn.widgets.TextInput(name="Tag name")
+ticket_time = pn.widgets.DatetimeRangePicker(name="Error time")
+customer = pn.widgets.Select(name="Customer", options=['Viettel', 'Metfone', 'Unitel', 'Movitel', 'Vnpt', 'Mobifone'])
+tag_optional = pn.widgets.TextInput(name="Optional tag")
+description = pn.widgets.TextAreaInput(name="Description", height=200)
+save_but = pn.widgets.Button(name="Save")
+alert2 = pn.pane.Alert("")
+ticket_tab = pn.Column(
+    index,
+    junos_hostname,
+    tag_name,
+    ticket_time,
+    customer,
+    tag_optional,
+    description,
+    save_but,
+    alert2,
+    width=800
+)
+
 # Code logic
 async def train_but_click(event):
     result = await training_data(path.value, str(training_period.value[0]), str(training_period.value[1]), hostname.value)
@@ -202,8 +247,35 @@ async def test_but_click(event):
     error.value = score[score['score'] > threshold.value]
     show_log.value = test_data
 
+async def save_but_click(event):
+    try:
+        cnx = mysql.connector.connect(
+            host=ticket_db["host"],
+            port=ticket_db["port"],
+            user=ticket_db["user"],
+            password=ticket_db["password"],
+            database="test"
+        )
+        cursor = cnx.cursor()
+        query = """
+        INSERT INTO ticket (index_name, junos_hostname, tag_name, start_time, stop_time, customer, tag_optional, description)
+        VALUES ('{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}');
+        """.format(index.value, junos_hostname.value, tag_name.value, str(ticket_time.value[0]), str(ticket_time.value[1]),
+        customer.value, tag_optional.value, description.value)
+        cursor.execute(query)
+        cnx.commit()
+        cursor.close()
+        cnx.close()
+        alert2.alert_type = "success"
+        alert2.object = "Save successful"
+    except:
+        alert2.alert_type = "danger"
+        alert2.object = "Save error"
+
 train_but.on_click(train_but_click)
 test_but.on_click(test_but_click)
+save_but.on_click(save_but_click)
+
 
 def callback_error(target, event):
    target.value = score_chart.data[score_chart.data['score'] > event.new]
@@ -223,13 +295,16 @@ def filtered_score(selection):
 pn.bind(filtered_score, score_panel.selection.param.brush, watch=True)
 # Append a layout to the main area, to demonstrate the list-like API
 template.main.append(
-    pn.GridBox(ncols=2,
-        objects=[
-            pn.Column(pn.pane.Markdown("# Score panel"), score_panel),
-            pn.Column(pn.pane.Markdown("# Possible error"), error, sizing_mode="stretch_both"),
-            pn.Column(pn.pane.Markdown("# Total document count per hour"), log_count_panel),
-            pn.Column(pn.pane.Markdown("# Raw log"), show_log, sizing_mode="stretch_both")], 
-        sizing_mode="stretch_both"
+    pn.Tabs(
+        ('Analysis', pn.GridBox(ncols=2,
+                        objects=[
+                            pn.Column(pn.pane.Markdown("# Score panel"), score_panel),
+                            pn.Column(pn.pane.Markdown("# Possible error"), error, sizing_mode="stretch_both"),
+                            pn.Column(pn.pane.Markdown("# Total document count per hour"), log_count_panel),
+                            pn.Column(pn.pane.Markdown("# Raw log"), show_log, sizing_mode="stretch_both")], 
+                        sizing_mode="stretch_both"
+        )),
+        ('Save ticket', ticket_tab)
     )
 )
 

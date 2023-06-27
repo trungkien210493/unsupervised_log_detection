@@ -44,7 +44,8 @@ def calculate_term_vector(data, vectorizer):
         vectorizer (CountVectorizer): The trained vector
     """
     # Tokenize data
-    data['process'] = data['message'].map(preprocess)
+    if 'process' not in data.columns:
+        data['process'] = data['message'].map(preprocess)
     matrix = vectorizer.transform(data['process'])
     # Count term per each document
     counts = pd.DataFrame(matrix.toarray(), columns=vectorizer.get_feature_names()).copy()
