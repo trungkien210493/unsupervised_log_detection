@@ -30,6 +30,8 @@ async def load_data_log_entity(folder, entity_name, hostname):
         # Get file content - Start
         if '.gz' in filename:
             content = BASE_LOG_ANALYSE.read_gzip_file(filename)
+        elif 'pfe' in filename:
+            pass
         else:
             with open(filename, 'r', encoding="latin-1") as f_in:
                 content = f_in.read()
@@ -46,6 +48,8 @@ async def load_data_log_entity(folder, entity_name, hostname):
                             tokens[0] = tokens[0].split()[1]
                         data1['timestamp'].append(tokens[0])
                         data1['message'].append(tokens[1])
+        elif 'pfe' in filename:
+            pass
         else:
             for line in content.split('\n'):
                 tokens = line.split(hostname)
@@ -239,6 +243,7 @@ ticket_tab = pn.Column(
 
 # Code logic
 async def train_but_click(event):
+    print("train button click")
     result = await training_data(path.value, str(training_period.value[0]), str(training_period.value[1]), hostname.value)
     alert.object = result
     alert.param.trigger("object")
