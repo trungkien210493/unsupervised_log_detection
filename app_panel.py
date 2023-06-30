@@ -93,13 +93,21 @@ def speed_up(time_filter, data, vectorizer, entropy):
     data_filter = { k: v[(v['timestamp'] >= str(time_filter[0])) & (v['timestamp'] < str(time_filter[1]))] for k, v in data.items() }
     return {'timestamp': time_filter[0].to_timestamp(), 'score': preprocessing.calculate_score(data_filter, vectorizer, entropy)['message']}
 
+def speed_up_split(filtered_data, vectorizer, entropy):
+    if len(filtered_data[1]) == 0:
+        return {'timestamp': filtered_data[0].to_datetime64(), 'score': 0}
+    else:
+        return {'timestamp': filtered_data[0].to_datetime64(), 'score': preprocessing.calculate_score({'message': filtered_data[1]}, vectorizer, entropy)['message']}
+
 def split_chunks_and_calculate_score(num_core, data, start, end, vectorizer, entropy, chunk_size='10s'):
-    period = pd.period_range(start=start, end=end, freq=chunk_size)
-    input_args = []
-    for i in range(len(period) - 1):
-        input_args.append([period[i], period[i + 1]])
+    # period = pd.period_range(start=start, end=end, freq=chunk_size)
+    # input_args = []
+    # for i in range(len(period) - 1):
+    #     input_args.append([period[i], period[i + 1]])
+    testing = data['message'][(data['message']['timestamp'] >= start) & (data['message']['timestamp'] < end)]
+    input_args = [[n, g] for n, g in testing.groupby(pd.Grouper(key='timestamp',freq='10s'))]
     pool = Pool(int(num_core))
-    chunks = pool.map(partial(speed_up, data=data, vectorizer=vectorizer, entropy=entropy), input_args)
+    chunks = pool.map(partial(speed_up_split, vectorizer=vectorizer, entropy=entropy), input_args)
     pool.close()
     pool.join()
     return chunks
