@@ -66,15 +66,18 @@ async def load_data_log_entity(folder, entity_name, hostname):
 
 async def training_data(folder, start, end, hostname):
     global entropy, vectorizer, data
-    df = await load_data_log_entity(folder, 'messages*', hostname)
-    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
-    df = df.dropna(subset=['timestamp'])
-    df.sort_values(by=['timestamp'], inplace=True)
-    df['timestamp'] = df['timestamp'].dt.tz_convert(None)
-    data['message'] = df
-    training_data = {k: v[(v['timestamp'] >= start) & (v['timestamp'] < end)] for k, v in data.items()}
-    entropy, vectorizer = preprocessing.preprocess_training_data(training_data)
-    return "Training done!"
+    try:
+        df = await load_data_log_entity(folder, 'messages*', hostname)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+        df = df.dropna(subset=['timestamp'])
+        df.sort_values(by=['timestamp'], inplace=True)
+        df['timestamp'] = df['timestamp'].dt.tz_convert(None)
+        data['message'] = df
+        training_data = {k: v[(v['timestamp'] >= start) & (v['timestamp'] < end)] for k, v in data.items()}
+        entropy, vectorizer = preprocessing.preprocess_training_data(training_data)
+        return "Training done!"
+    except Exception as e:
+        return "Training error due to: {}".format(e)
 
 def inspect_data(start, end):
     global data
@@ -121,6 +124,9 @@ def testing_data(start, end):
     score_chunks = split_chunks_and_calculate_score(4, data, start, end, vectorizer, entropy)
     score = pd.DataFrame(score_chunks)
     testing = {k: v[(v['timestamp'] >= start) & (v['timestamp'] < end)] for k, v in data.items()}['message']
+    if len(testing) == 0:
+        alert.object = "There is no data in testing time"
+        alert.param.trigger("object")
     grouped = testing.groupby(pd.Grouper(key='timestamp', axis=0, freq='H')).count()
     grouped = grouped.reset_index()
     grouped.columns = ['timestamp', 'count']
