@@ -114,7 +114,7 @@ def split_chunks_and_calculate_score(num_core, data, start, end, vectorizer, ent
 
 def testing_data(start, end):
     global entropy, vectorizer, data
-    score_chunks = split_chunks_and_calculate_score(3, data, start, end, vectorizer, entropy)
+    score_chunks = split_chunks_and_calculate_score(4, data, start, end, vectorizer, entropy)
     score = pd.DataFrame(score_chunks)
     testing = {k: v[(v['timestamp'] >= start) & (v['timestamp'] < end)] for k, v in data.items()}['message']
     grouped = testing.groupby(pd.Grouper(key='timestamp', axis=0, freq='H')).count()
@@ -203,8 +203,8 @@ es_connection = {
     "password": "juniper@123"
 }
 ticket_db = {
-    "host": "10.98.0.113",
-    "port": 13306,
+    "host": "10.98.0.161",
+    "port": 3306,
     "user": "juniper",
     "password": "juniper@123"
 }
@@ -248,7 +248,7 @@ async def test_but_click(event):
     st = dt.datetime.now()
     score, count, test_data = testing_data(str(testing_period.value[0]), str(testing_period.value[1]))
     print(dt.datetime.now() - st)
-    score_chart.data = score
+    score_chart.data = score.copy()
     score_panel.param.trigger('object')
     log_count_chart.data = count
     log_count_panel.param.trigger('object')
@@ -262,7 +262,7 @@ async def save_but_click(event):
             port=ticket_db["port"],
             user=ticket_db["user"],
             password=ticket_db["password"],
-            database="test"
+            database="ticket"
         )
         cursor = cnx.cursor()
         query = """
