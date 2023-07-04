@@ -5,8 +5,10 @@ import gensim
 from nltk.stem import WordNetLemmatizer, SnowballStemmer
 from nltk.stem.porter import *
 import math
+from functools import lru_cache
 
 
+@lru_cache(maxsize=10000)
 def lemmatize_stemming(text):
     return WordNetLemmatizer().lemmatize(text, pos='v')
 
@@ -90,7 +92,9 @@ def preprocess_log_entities_data(le_data, vectorizer):
     # print(agg[['last', 'message', 'rpd']])
     agg_df = agg.div(agg.sum(axis=0), axis=1)
     # Calculate the p * log2(p)
-    agg_df = agg_df.applymap(calculate_entropy)
+    # agg_df = agg_df.applymap(calculate_entropy)
+    agg_df = agg_df * np.log2(agg_df)
+    agg_df.fillna(0, inplace=True)
     # Sum according to column to get sum of all p * log2(p) (entropy of a term in M normative chunks). After that, divide M and plus 1 to calculate entropy.
     entropy = 1 + agg_df.sum()/math.log2(len(agg_df))
     return entropy.to_dict()

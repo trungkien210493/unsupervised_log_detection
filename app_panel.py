@@ -73,7 +73,7 @@ async def training_data(folder, start, end, hostname):
         df.sort_values(by=['timestamp'], inplace=True)
         df['timestamp'] = df['timestamp'].dt.tz_convert(None)
         data['message'] = df
-        training_data = {k: v[(v['timestamp'] >= start) & (v['timestamp'] < end)] for k, v in data.items()}
+        training_data = {k: v[(v['timestamp'] >= start) & (v['timestamp'] < end)].copy(deep=True) for k, v in data.items()}
         entropy, vectorizer = preprocessing.preprocess_training_data(training_data)
         return "Training done!"
     except Exception as e:
@@ -250,11 +250,13 @@ ticket_tab = pn.Column(
 # Code logic
 async def train_but_click(event):
     print("train button click")
+    alert.object = ""
+    alert.param.trigger("object")
     result = await training_data(path.value, str(training_period.value[0]), str(training_period.value[1]), hostname.value)
     alert.object = result
     alert.param.trigger("object")
 
-async def test_but_click(event):
+def test_but_click(event):
     print("test button click")
     st = dt.datetime.now()
     score, count, test_data = testing_data(str(testing_period.value[0]), str(testing_period.value[1]))
