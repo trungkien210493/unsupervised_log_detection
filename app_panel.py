@@ -133,16 +133,25 @@ def testing_data(start, end):
     # testing['timestamp'] = testing['timestamp'].dt.tz_convert(None)
     return score, grouped, testing
 
+def get_path_value():
+    query_params = pn.state.session_args
+    if 'path' in query_params:
+        return query_params['path'][0].decode('utf-8')
+    else:
+        return ''
+
 # UI component
 junos_hostname = pn.widgets.TextInput(name="Host name")
 alert = pn.pane.Alert("", width=300)
 path = pn.widgets.TextAreaInput(name='Log path', placeholder='Enter a string here...', value=os.getcwd(), height=100)
+path.value = get_path_value()
 hostname = pn.widgets.TextInput(name='Hostname', placeholder='Enter a string here...', value=junos_hostname)
 training_period = pn.widgets.DatetimeRangePicker(name="Training period")
 train_but = pn.widgets.Button(name='Train', sizing_mode='stretch_width')
 testing_period = pn.widgets.DatetimeRangePicker(name="Testing period")
 threshold = pn.widgets.IntSlider(name='Threshold', start=4, end=10, step=1, value=5)
 test_but = pn.widgets.Button(name='Test', sizing_mode='scale_width')
+
 # Sidebar
 sidebar = pn.layout.WidgetBox(
     path,
