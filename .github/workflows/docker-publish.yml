@@ -1,11 +1,17 @@
 name: main
-on: workflow_dispatch
-  #push:
-  #  branches:
-  #    - main
-  #pull_request:
-  #  branches:
-  #    - main
+on: 
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to run '
+        type: environment
+        required: false
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 
 env:
@@ -33,7 +39,7 @@ jobs:
         with:
           context: ./
           file: ./Dockerfile
-          tags: ghcr.io/trungkien210493/unsupervised_log_detection:v1-b${{ github.run_number }}
+          tags: ghcr.io/${{ github.repository_owner }}/unsupervised_log_detection:v1-b${{ github.run_number }}
           push: true
-          pull: true
+          #pull: true
 
