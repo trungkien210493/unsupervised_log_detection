@@ -17,6 +17,9 @@ alt.data_transformers.disable_max_rows()
 nltk.download('wordnet')
 from elasticsearch import Elasticsearch
 import mysql.connector
+from datasource import es_connection, ticket_db
+import urllib3
+urllib3.disable_warnings()
 
 
 data = dict()
@@ -215,25 +218,18 @@ log_count_panel = pn.pane.Vega(log_count_chart, margin=5)
 error = pn.widgets.Tabulator(sizing_mode="stretch_both", margin=5, page_size=5, pagination='remote')
 show_log = pn.widgets.Tabulator(styles={"font-size": "10px"}, sizing_mode="stretch_both", margin=5, pagination=None)
 # Ticket tab
-es_connection = {
-    "host": "10.98.100.106",
-    "port": 9200,
-    "user": "elastic",
-    "password": "juniper@123"
-}
-ticket_db = {
-    "host": "10.98.0.161",
-    "port": 3306,
-    "user": "juniper",
-    "password": "juniper@123"
-}
+
 def load_index_name(es_connection):
-    es = Elasticsearch(
-        [{"host": es_connection["host"], "port": es_connection["port"]}],
-        http_auth=(es_connection["user"], es_connection["password"]),
-        use_ssl=True, verify_certs=False
-    )
-    return list(es.indices.get_alias(index="*").keys())
+    try:
+        es = Elasticsearch(
+            [{"host": es_connection["host"], "port": es_connection["port"]}],
+            http_auth=(es_connection["user"], es_connection["password"]),
+            use_ssl=True, verify_certs=False, ssl_show_warn=False
+        )
+        return list(es.indices.get_alias(index="*").keys())
+    except Exception as err:
+        return []
+
 index = pn.widgets.AutocompleteInput(name="Index name", options=load_index_name(es_connection))
 hostname.link(junos_hostname, value='value')
 tag_name = pn.widgets.TextInput(name="Tag name")
