@@ -44,4 +44,4 @@ jobs:
           #pull: true
       - uses: EndBug/latest-tag@latest
         with:
-          force-branch: true
+          force-branch: false
