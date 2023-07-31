@@ -39,9 +39,6 @@ jobs:
         with:
           context: ./
           file: ./Dockerfile
-          tags: ghcr.io/${{ github.repository_owner }}/unsupervised_log_detection:v1-b${{ github.run_number }}
+          tags: ghcr.io/${{ github.repository_owner }}/unsupervised_log_detection:v1-b${{ github.run_number }}, ghcr.io/${{ github.repository_owner }}/unsupervised_log_detection:lastest
           push: true
           #pull: true
-      - uses: EndBug/latest-tag@latest
-        with:
-          force-branch: false
