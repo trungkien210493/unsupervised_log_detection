@@ -71,7 +71,7 @@ async def training_data(folder, start, end, hostname):
     global entropy, vectorizer, data
     try:
         df = await load_data_log_entity(folder, 'messages*', hostname)
-        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce', utc=True)
         df = df.dropna(subset=['timestamp'])
         df.sort_values(by=['timestamp'], inplace=True)
         df['timestamp'] = df['timestamp'].dt.tz_convert(None)
