@@ -5,7 +5,7 @@ es_connection = {
     "password": "juniper@123"
 }
 ticket_db = {
-    "host": "10.98.0.161",
+    "host": "10.98.100.107",
     "port": 3306,
     "user": "juniper",
     "password": "juniper@123"
