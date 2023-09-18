@@ -154,7 +154,15 @@ train_but = pn.widgets.Button(name='Train', sizing_mode='stretch_width')
 testing_period = pn.widgets.DatetimeRangePicker(name="Testing period")
 threshold = pn.widgets.IntSlider(name='Threshold', start=4, end=10, step=1, value=5)
 test_but = pn.widgets.Button(name='Test', sizing_mode='scale_width')
+loading = pn.indicators.LoadingSpinner(width=20, height=20, value=False, visible=False)
 
+def load_display(x):
+    if(x=='on'):
+        loading.value=True
+        loading.visible=True
+    if(x=='off'):
+        loading.value=False
+        loading.visible=False
 # Sidebar
 sidebar = pn.layout.WidgetBox(
     path,
@@ -171,6 +179,7 @@ sidebar = pn.layout.WidgetBox(
 template = pn.template.MaterialTemplate(
     title='Syslog Analysis',
     sidebar=sidebar,
+    busy_indicator=loading
 )
 # Main
 # Action
@@ -255,14 +264,18 @@ ticket_tab = pn.Column(
 # Code logic
 async def train_but_click(event):
     print("train button click")
+    load_display('on')
+    await asyncio.sleep(1)
     alert.object = ""
     alert.param.trigger("object")
     result = await training_data(path.value, str(training_period.value[0]), str(training_period.value[1]), hostname.value)
     alert.object = result
     alert.param.trigger("object")
+    load_display('off')
 
 def test_but_click(event):
     print("test button click")
+    load_display('on')
     st = dt.datetime.now()
     score, count, test_data = testing_data(str(testing_period.value[0]), str(testing_period.value[1]))
     print(dt.datetime.now() - st)
@@ -272,6 +285,7 @@ def test_but_click(event):
     log_count_panel.param.trigger('object')
     error.value = score[score['score'] > threshold.value]
     show_log.value = test_data
+    load_display('off')
 
 async def save_but_click(event):
     try:
