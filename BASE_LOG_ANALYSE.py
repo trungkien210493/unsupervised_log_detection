@@ -180,7 +180,7 @@ def analysing_log(host_name, file_name, pattern_dict, content):
     return line_regex_found
 
 
-def analysing_log_single_process(host_name, file_name, pattern_dict):
+def analysing_log_single_process(file_name, host_name, pattern_dict):
     line_regex_found = []
     logging.debug('Reading content from log file: {}'.format(file_name))
     # Read file content - Start

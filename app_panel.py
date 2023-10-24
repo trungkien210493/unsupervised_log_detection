@@ -20,6 +20,7 @@ import mysql.connector
 from datasource import es_connection, ticket_db
 import urllib3
 urllib3.disable_warnings()
+from pattern_dict import pattern_dict
 
 
 data = dict()
@@ -143,6 +144,26 @@ def get_path_value():
     else:
         return ''
 
+def check_kb(folder, start, end, hostname, list_file):
+    # Get list file
+    list_log_file = []
+    for filter_name in list_file:
+        list_log_file += BASE_LOG_ANALYSE.get_file_list_by_filename_filter(folder, filter_name)
+    
+    # Filter file by time
+    filter_list_log = []
+    for log_file in list_log_file:
+        modification_time = os.path.getmtime(log_file)
+        if modification_time >= start.timestamp():
+            filter_list_log.append(log_file)
+    # Check KB
+    print("Find KB in: {}".format(filter_list_log))
+    pool = Pool(4)
+    chunks = pool.map(partial(BASE_LOG_ANALYSE.analysing_log_single_process, host_name=hostname, pattern_dict=pattern_dict), filter_list_log)
+    pool.close()
+    pool.join()
+    return chunks
+
 # UI component
 junos_hostname = pn.widgets.TextInput(name="Host name")
 alert = pn.pane.Alert("", width=300)
@@ -205,7 +226,7 @@ score_chart = alt.Chart(empty_score).mark_line().encode(
     y='score',
     tooltip=['timestamp', 'score']
 ).properties(
-    width=450,
+    width=600,
     height=360
 ).add_params(
     brush,
@@ -219,7 +240,7 @@ log_count_chart = alt.Chart(empty_log_count).mark_line().encode(
     y='count',
     tooltip=['timestamp', 'count']
 ).properties(
-    width=450,
+    width=600,
     height=360
 ).interactive()
 
@@ -243,7 +264,7 @@ index = pn.widgets.AutocompleteInput(name="Index name", options=load_index_name(
 hostname.link(junos_hostname, value='value')
 tag_name = pn.widgets.TextInput(name="Tag name")
 ticket_time = pn.widgets.DatetimeRangePicker(name="Error time")
-customer = pn.widgets.Select(name="Customer", options=['Viettel', 'Metfone', 'Unitel', 'Movitel', 'Vnpt', 'Mobifone'])
+customer = pn.widgets.Select(name="Customer", options=['viettel', 'metfone', 'unitel', 'movitel', 'nnpt', 'mobifone', 'cmc', 'natcom', 'ftel'])
 tag_optional = pn.widgets.TextInput(name="Optional tag")
 description = pn.widgets.TextAreaInput(name="Description", height=200)
 save_but = pn.widgets.Button(name="Save")
@@ -260,7 +281,18 @@ ticket_tab = pn.Column(
     alert2,
     width=800
 )
-
+# Check KB tab
+filter_file = pn.widgets.CheckBoxGroup(
+    name='Log files', options=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
+    value=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
+    inline=True
+)
+check_kb_but = pn.widgets.Button(name="Check")
+show_kb = pn.widgets.Tabulator(styles={"font-size": "10px"}, sizing_mode="stretch_both", margin=5, pagination=None)
+kb_tab = pn.Column(
+    pn.Row(filter_file, check_kb_but),
+    show_kb
+)
 # Code logic
 async def train_but_click(event):
     print("train button click")
@@ -333,10 +365,17 @@ def filtered_score(selection):
         error.value = filter_score[filter_score['score'] > threshold.value]
 
 pn.bind(filtered_score, score_panel.selection.param.brush, watch=True)
+def check_kb_click(event):
+    load_display('on')
+    kb = check_kb(path.value, testing_period.value[0], testing_period.value[1], hostname.value, filter_file.value)
+    print(kb)
+    load_display('off')
+
+check_kb_but.on_click(check_kb_click)
 # Append a layout to the main area, to demonstrate the list-like API
 template.main.append(
     pn.Tabs(
-        ('Analysis', pn.GridBox(ncols=2,
+        ('Analysis', pn.GridBox(ncols=2, nrows=2,
                         objects=[
                             pn.Column(pn.pane.Markdown("# Score panel"), score_panel),
                             pn.Column(pn.pane.Markdown("# Possible error"), error, sizing_mode="stretch_both"),
@@ -344,7 +383,8 @@ template.main.append(
                             pn.Column(pn.pane.Markdown("# Raw log"), show_log, sizing_mode="stretch_both")], 
                         sizing_mode="stretch_both"
         )),
-        ('Save ticket', ticket_tab)
+        ('Save ticket', ticket_tab),
+        ('Check KB', kb_tab)
     )
 )
 
