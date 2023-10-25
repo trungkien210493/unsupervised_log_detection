@@ -368,7 +368,18 @@ pn.bind(filtered_score, score_panel.selection.param.brush, watch=True)
 def check_kb_click(event):
     load_display('on')
     kb = check_kb(path.value, testing_period.value[0], testing_period.value[1], hostname.value, filter_file.value)
-    print(kb)
+    flatten_kb = []
+    for x in kb:
+        flatten_kb.extend(x)
+    if len(flatten_kb) > 0:
+        kb_df = pd.DataFrame(flatten_kb, columns=['time', 'log', 'hostname', 'file', 'line', 'KB', 'pri_code'])
+        kb_df['time'] = pd.to_datetime(kb_df['time'], errors='coerce', utc=True)
+        kb_df = kb_df.dropna(subset=['time'])
+        kb_df.sort_values(by=['time'], inplace=True)
+        kb_df['time'] = kb_df['time'].dt.tz_convert(None)
+        show_kb.value = kb_df[(kb_df['time'] >= str(testing_period.value[0])) & (kb_df['time'] <= str(testing_period.value[1]))]
+    else:
+        show_kb.value = pd.DataFrame([{'result': 'there is no log match KB'}])
     load_display('off')
 
 check_kb_but.on_click(check_kb_click)
