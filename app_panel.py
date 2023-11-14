@@ -3,6 +3,7 @@ import numpy as np
 import panel as pn
 import pandas as pd
 import os
+import gzip
 import datetime as dt
 import altair as alt
 import preprocessing
@@ -17,15 +18,16 @@ alt.data_transformers.disable_max_rows()
 nltk.download('wordnet')
 from elasticsearch import Elasticsearch
 import mysql.connector
-from datasource import es_connection, ticket_db
+from datasource import es_connection, ticket_db, num_core, pattern_dict
+from multiprocesspandas import applyparallel
+import re
 import urllib3
 urllib3.disable_warnings()
-from pattern_dict import pattern_dict
-
 
 data = dict()
 entropy = dict()
 vectorizer = None
+template_id_df = pd.DataFrame()
 
 # Core function
 async def load_data_log_entity(folder, entity_name, hostname):
@@ -67,6 +69,33 @@ async def load_data_log_entity(folder, entity_name, hostname):
                         data1['message'].append(tokens[1])
         # Parsing data to get time and info - End
     return pd.DataFrame(data1)
+
+def is_valid_file(filepath, start_time, stop_time):
+    modification_time = os.path.getmtime(filepath)
+    if modification_time >= start_time:
+        content = ''
+        if '.gz' in filepath:
+            with gzip.open(filepath, 'rb') as f_in:
+                content = f_in.read(2048).decode("latin-1")
+        elif 'pfe' in filepath:
+            pass
+        else:
+            with open(filepath, 'r', encoding="latin-1") as f_in:
+                content = f_in.read(2048)
+        for line in content.split('\n'):
+            [timestamp, log_info, pri_code] = BASE_LOG_ANALYSE.parsing_line(line)
+            t = pd.to_datetime(timestamp, errors='coerce', utc=True)
+            if not pd.isnull(t):
+                break
+        if pd.isnull(t):
+            return False
+        else:
+            if t.timestamp() > stop_time:
+                return False
+            else:
+                return True
+    else:
+        return False
 
 async def training_data(folder, start, end, hostname):
     global entropy, vectorizer, data
@@ -124,8 +153,8 @@ def split_chunks_and_calculate_score(num_core, data, start, end, vectorizer, ent
     return chunks
 
 def testing_data(start, end):
-    global entropy, vectorizer, data
-    score_chunks = split_chunks_and_calculate_score(4, data, start, end, vectorizer, entropy)
+    global entropy, vectorizer, data, num_core
+    score_chunks = split_chunks_and_calculate_score(num_core, data, start, end, vectorizer, entropy)
     score = pd.DataFrame(score_chunks)
     testing = {k: v[(v['timestamp'] >= start) & (v['timestamp'] < end)] for k, v in data.items()}['message']
     if len(testing) == 0:
@@ -145,6 +174,7 @@ def get_path_value():
         return ''
 
 def check_kb(folder, start, end, hostname, list_file):
+    global num_core
     # Get list file
     list_log_file = []
     for filter_name in list_file:
@@ -153,12 +183,11 @@ def check_kb(folder, start, end, hostname, list_file):
     # Filter file by time
     filter_list_log = []
     for log_file in list_log_file:
-        modification_time = os.path.getmtime(log_file)
-        if modification_time >= start.timestamp():
+        if is_valid_file(log_file, start.timestamp(), end.timestamp()):
             filter_list_log.append(log_file)
     # Check KB
     print("Find KB in: {}".format(filter_list_log))
-    pool = Pool(4)
+    pool = Pool(num_core)
     chunks = pool.map(partial(BASE_LOG_ANALYSE.analysing_log_single_process, host_name=hostname, pattern_dict=pattern_dict), filter_list_log)
     pool.close()
     pool.join()
@@ -246,7 +275,7 @@ log_count_chart = alt.Chart(empty_log_count).mark_line().encode(
 
 log_count_panel = pn.pane.Vega(log_count_chart, margin=5)
 error = pn.widgets.Tabulator(sizing_mode="stretch_both", margin=5, page_size=5, pagination='remote')
-show_log = pn.widgets.Tabulator(styles={"font-size": "10px"}, sizing_mode="stretch_both", margin=5, pagination=None)
+show_log = pn.widgets.Tabulator(styles={"font-size": "10pt"}, sizing_mode="stretch_both", margin=5, pagination=None)
 # Ticket tab
 
 def load_index_name(es_connection):
@@ -288,10 +317,40 @@ filter_file = pn.widgets.CheckBoxGroup(
     inline=True
 )
 check_kb_but = pn.widgets.Button(name="Check")
-show_kb = pn.widgets.Tabulator(styles={"font-size": "10px"}, sizing_mode="stretch_both", margin=5, pagination=None)
+show_kb = pn.widgets.Tabulator(styles={"font-size": "10pt"}, sizing_mode="stretch_both", margin=5, pagination=None)
 kb_tab = pn.Column(
     pn.Row(filter_file, check_kb_but),
     show_kb
+)
+# Log pattern tab
+filter_file_pattern = pn.widgets.CheckBoxGroup(
+    name='Log files', options=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
+    value=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
+    inline=True
+)
+get_data_but = pn.widgets.Button(name="Get data")
+count_template_id = alt.Chart(pd.DataFrame({'timestamp': [], 'count': [], 'template_id': []})).mark_line().encode(
+    x='timestamp',
+    y='count',
+    color='template_id:N',
+    tooltip=['timestamp', 'count', 'template_id']
+).properties(
+    width=700,
+    height=720
+).add_params(
+    brush,
+    interaction
+)
+
+count_panel = pn.pane.Vega(count_template_id, margin=5, min_width=700)
+show_log_pattern = pn.widgets.Tabulator(styles={"font-size": "9pt"}, 
+                                        layout='fit_data_table', 
+                                        sizing_mode="stretch_both", 
+                                        hidden_columns=['index'],
+                                        min_width=800, pagination=None,)
+log_pattern_tab = pn.Column(
+    pn.Row(filter_file_pattern, get_data_but),
+    pn.Row(count_panel, show_log_pattern)
 )
 # Code logic
 async def train_but_click(event):
@@ -383,6 +442,80 @@ def check_kb_click(event):
     load_display('off')
 
 check_kb_but.on_click(check_kb_click)
+# log_pattern_tab_logic
+def get_data_multiprocess(folder, start, end, list_file):
+    global num_core
+    # Get list file
+    list_log_file = []
+    for filter_name in list_file:
+        list_log_file += BASE_LOG_ANALYSE.get_file_list_by_filename_filter(folder, filter_name)
+    
+    # Filter file by time
+    filter_list_log = []
+    for log_file in list_log_file:
+        if is_valid_file(log_file, start.timestamp(), end.timestamp()):
+            filter_list_log.append(log_file)
+    # Get data
+    pool = Pool(num_core)
+    chunks = pool.map(BASE_LOG_ANALYSE.read_and_parse_data, filter_list_log)
+    pool.close()
+    pool.join()
+    return chunks
+
+def tag_template_id(df, x, y):
+    # Wrapper multiple processing to tag template id
+    s = dict(zip(x, y))
+    for k, v in s.items():
+        if re.match(k, df['log']):
+            df['template_id'] = v
+            break
+    return df
+
+def get_data_click(event):
+    load_display('on')
+    global num_core
+    # Get template id - Start
+    conn = mysql.connector.connect(
+        host=ticket_db["host"],
+        port=ticket_db["port"],
+        user=ticket_db["user"],
+        password=ticket_db["password"],
+        database="svtech_log"
+    )
+    cursor = conn.cursor()
+    cursor.execute("SELECT regex_pattern, template_id FROM template")
+    result = cursor.fetchall()
+    x = [r".*{}.*".format(pattern[0].replace("(", "\(").replace(')', '\)')) for pattern in result]
+    y = [pattern[1] for pattern in result]
+    # Get template id - End
+    chunks = get_data_multiprocess(path.value, testing_period.value[0], testing_period.value[1], filter_file_pattern.value)
+    flatten_data = []
+    for z in chunks:
+        flatten_data.extend(z)
+    temp_df = pd.DataFrame(flatten_data, columns=['timestamp', 'log', 'pricode'])
+    temp_df['timestamp'] = pd.to_datetime(temp_df['timestamp'], errors='coerce', utc=True)
+    temp_df.dropna(subset=['timestamp'], inplace=True)
+    temp_df.sort_values(by=['timestamp'], inplace=True)
+    temp_df['timestamp'] = temp_df['timestamp'].dt.tz_convert(None)
+    template_id_df = temp_df[(temp_df['timestamp'] >= str(testing_period.value[0])) & (temp_df['timestamp'] <= str(testing_period.value[1]))].copy(deep=True)
+    # Tag template id - Start
+    template_id_df['template_id'] = 'Unknown'
+    template_id_df = template_id_df.apply_parallel(tag_template_id, x=x, y=y, num_processes=num_core)
+    # Tag template id - End
+    # Add log
+    show_log_pattern.value = template_id_df[['timestamp', 'template_id', 'log', 'pricode']]
+    # Add panel
+    template_id_df['date_hour'] = template_id_df['timestamp'].dt.to_period('H')
+    top10_template_id = template_id_df['template_id'].value_counts().nlargest(10).index
+    df_top10 = template_id_df[template_id_df['template_id'].isin(top10_template_id)]
+    top10_per_date_hour = df_top10.groupby(['date_hour', 'template_id']).size().reset_index(name='count')
+    top10_per_date_hour['date_hour'] = top10_per_date_hour['date_hour'].dt.to_timestamp()
+    top10_per_date_hour.columns = ['timestamp', 'template_id', 'count']
+    count_template_id.data = top10_per_date_hour
+    count_panel.param.trigger('object')
+    load_display('off')
+
+get_data_but.on_click(get_data_click)
 # Append a layout to the main area, to demonstrate the list-like API
 template.main.append(
     pn.Tabs(
@@ -395,7 +528,8 @@ template.main.append(
                         sizing_mode="stretch_both"
         )),
         ('Save ticket', ticket_tab),
-        ('Check KB', kb_tab)
+        ('Check KB', kb_tab),
+        ('Log pattern', log_pattern_tab),
     )
 )
 

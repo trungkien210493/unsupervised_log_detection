@@ -12,4 +12,5 @@ hvplot==0.8.4
 altair==5.0.1
 elasticsearch==7.16.2
 mysql-connector==2.2.9
-multiprocess==0.70.14
+multiprocess==0.70.11.1
+multiprocesspandas==1.1.5

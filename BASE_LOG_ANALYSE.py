@@ -179,6 +179,18 @@ def analysing_log(host_name, file_name, pattern_dict, content):
     logging.warning('line_regex_found {}'.format(line_regex_found))
     return line_regex_found
 
+def read_and_parse_data(file_name):
+    line_parsed = []
+    # Read file content - Start
+    if '.gz' in file_name:
+        content = read_gzip_file(file_name)
+    else:
+        with open(file_name, 'r', encoding="latin-1") as f_in:
+            content = f_in.read()
+    # Read file content - End
+    for line in content.split("\n"):
+        line_parsed.append(parsing_line(line))
+    return line_parsed
 
 def analysing_log_single_process(file_name, host_name, pattern_dict):
     line_regex_found = []
