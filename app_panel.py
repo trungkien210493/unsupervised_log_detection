@@ -18,7 +18,7 @@ alt.data_transformers.disable_max_rows()
 nltk.download('wordnet')
 from elasticsearch import Elasticsearch
 import mysql.connector
-from datasource import es_connection, ticket_db, num_core, pattern_dict
+from datasource import es_connection, ticket_db, num_core, pattern_dict, data_path
 from multiprocesspandas import applyparallel
 import re
 import urllib3

@@ -14,3 +14,6 @@ elasticsearch==7.16.2
 mysql-connector==2.2.9
 multiprocess==0.70.11.1
 multiprocesspandas==1.1.5
+pyunpack==0.3
+patool==1.15.0
+polars==0.20.3
