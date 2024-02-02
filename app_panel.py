@@ -27,6 +27,7 @@ import syslog_rust
 urllib3.disable_warnings()
 
 # Global variable
+verify_data = None
 entropy = dict()
 vectorizer = None
 # UI components - Start
@@ -177,6 +178,7 @@ main_page = pn.template.MaterialTemplate(
 # UI components - End
 # Component logic - Start
 def reset(event):
+    global data_path
     file_input.disabled = False
     progress.active = True
     progress.active = False
@@ -224,14 +226,28 @@ file_input.jscallback(
     """
 )
 file_input.param.watch(reset, 'value')
+
+def load_display(x):
+    if(x=='on'):
+        loading.value=True
+        loading.visible=True
+    if(x=='off'):
+        loading.value=False
+        loading.visible=False
+
+def get_saved_data_path():
+    global data_path
+    extract_path = os.path.join(data_path, 'extracted')
+    file_name, file_extension = os.path.splitext(file_input.filename)
+    return os.path.join(extract_path, file_name)
+    
 # Analysis tab - Start
-async def training_data(folder, start, end):
+def training_data(folder, start, end):
     global entropy, vectorizer
     list_file = []
     for filename in BASE_LOG_ANALYSE.get_file_list_by_filename_filter(folder, 'messages*'):
         list_file.append(filename)
     try:
-        pn.state.notifications.info("Start training data")
         train_data = syslog_rust.processing_log(list_file, start, end)
         if len(train_data) == 0:
             pn.state.notifications.warning("There is no data in current time filter")
@@ -239,20 +255,91 @@ async def training_data(folder, start, end):
             df = pd.DataFrame(train_data)[['time', 'log']].rename(columns={"time": "timestamp", "log": "message"})
             df['timestamp'] = pd.to_datetime(df['timestamp'])
             df.sort_values(by=['timestamp'], inplace=True)
-            entropy, vectorizer = preprocessing.preprocess_training_data(training_data)
+            entropy, vectorizer = preprocessing.preprocess_training_data({'message': df})
             pn.state.notifications.info("Training done!")
     except Exception as e:
         pn.state.notifications.error("Training error due to: {}".format(e))
 
+def speed_up_split(filtered_data, vectorizer, entropy):
+    if len(filtered_data[1]) == 0:
+        return {'timestamp': filtered_data[0].to_datetime64(), 'score': 0}
+    else:
+        return {'timestamp': filtered_data[0].to_datetime64(), 'score': preprocessing.calculate_score({'message': filtered_data[1]}, vectorizer, entropy)['message']}
+
 def testing_data(folder, start, end):
-    global entropy, vectorizer, num_core
+    global entropy, vectorizer, num_core, verify_data
     list_file = []
     for filename in BASE_LOG_ANALYSE.get_file_list_by_filename_filter(folder, 'messages*'):
         list_file.append(filename)
     try:
-        pass
+        pn.state.notifications.info("Verify data in testing period")
+        test_data = syslog_rust.processing_log(list_file, start, end)
+        if len(test_data) == 0:
+            pn.state.notifications.warning("There is no data in current time filter")
+        else:
+            df = pd.DataFrame(test_data)[['time', 'log']].rename(columns={"time": "timestamp", "log": "message"})
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df.sort_values(by=['timestamp'], inplace=True)
+            input_args = [[n, g] for n, g in df.groupby(pd.Grouper(key='timestamp',freq='10s'))]
+            pool = Pool(int(num_core))
+            chunks = pool.map(partial(speed_up_split, vectorizer=vectorizer, entropy=entropy), input_args)
+            pool.close()
+            pool.join()
+            score = pd.DataFrame(chunks)
+            grouped = df.groupby(pd.Grouper(key='timestamp', axis=0, freq='H')).count()
+            grouped = grouped.reset_index()
+            grouped.columns = ['timestamp', 'count']
+            score_chart.data = score
+            score_panel.param.trigger('object')
+            log_count_chart.data = grouped
+            log_count_panel.param.trigger('object')
+            # To convert from utc time to local time display (display only)
+            df['timestamp'] = df['timestamp'].dt.tz_localize(None)
+            show_log.value = df
+            verify_data = df
+            error.value = score[score['score'] > threshold.value]
     except Exception as e:
+        pn.state.notifications.error("Testing error due to: {}".format(e))
+
+def train_but_click(event):
+    load_display('on')
+    pn.state.notifications.info("Start training data")
+    training_data(get_saved_data_path(), str(training_period.value[0]), str(training_period.value[1]))
+    load_display('off')
+
+def test_but_click(event):
+    load_display('on')
+    testing_data(get_saved_data_path(), str(testing_period.value[0]), str(testing_period.value[1]))
+    load_display('off')
+
+train_but.on_click(train_but_click)
+test_but.on_click(test_but_click)
+
+def callback_error(target, event):
+   target.value = score_chart.data[score_chart.data['score'] > event.new]
+
+threshold.link(error, callbacks={'value': callback_error})
+
+def inspect_data(start, end):
+    global verify_data
+    inspect = verify_data[(verify_data['timestamp'] >= start) & (verify_data['timestamp'] < end)].copy()
+    return inspect
+
+def filtered_score(selection):
+    if not selection:
         pass
+    else:
+        s1 = dt.datetime.fromtimestamp(selection['timestamp'][0]/1000)
+        e1 = dt.datetime.fromtimestamp(selection['timestamp'][1]/1000)
+        s2 = dt.datetime.utcfromtimestamp(selection['timestamp'][0]/1000)
+        e2 = dt.datetime.utcfromtimestamp(selection['timestamp'][1]/1000)
+        show_log.value = inspect_data(str(s1), str(e1))
+        filter_score = score_chart.data[(score_chart.data['timestamp'] >= str(s2)) & (score_chart.data['timestamp'] < str(e2))].copy()
+        # Hack to convert timestamp to show as localtime
+        filter_score['timestamp'] = filter_score['timestamp'].dt.tz_localize('America/Creston')
+        error.value = filter_score[filter_score['score'] > threshold.value]
+
+pn.bind(filtered_score, score_panel.selection.param.brush, watch=True)
 # Analysis tab - End
 # Component logic - End
 
