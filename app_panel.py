@@ -440,6 +440,48 @@ def filtered_log(selection):
         show_log_pattern.value = template_id_df[(template_id_df['timestamp'] >= str(s)) & (template_id_df['timestamp'] < str(e))][['timestamp', 'template_id', 'filename', 'log']]
 pn.bind(filtered_log, count_panel.selection.param.brush, watch=True)
 # Log pattern tab - End
+# Save ticket - Start
+def save_but_click(event):
+    try:
+        cnx = mysql.connector.connect(
+            host=ticket_db["host"],
+            port=ticket_db["port"],
+            user=ticket_db["user"],
+            password=ticket_db["password"],
+            database="svtech_log"
+        )
+        cursor = cnx.cursor()
+        table_name = 'ticket'
+        cursor.execute(f"SHOW TABLES LIKE '{table_name}'")
+        result = cursor.fetchone()
+        if not result:
+            table_creation_query = f'''
+            CREATE TABLE {table_name} (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                `file_name` text DEFAULT NULL,
+                `tag_name` text DEFAULT NULL,
+                `start_time` datetime DEFAULT NULL,
+                `stop_time` datetime DEFAULT NULL,
+                `customer` text DEFAULT NULL,
+                `tag_optional` text DEFAULT NULL,
+                `description` longtext DEFAULT NULL
+            )
+            '''
+            cursor.execute(table_creation_query)
+        insert_query = '''
+        INSERT INTO ticket (file_name, tag_name, start_time, stop_time, customer, tag_optional, description)
+        VALUES ('{}', '{}', '{}', '{}', '{}', '{}', '{}');
+        '''.format(file_input.filename, tag_name.value, str(ticket_time.value[0]), str(ticket_time.value[1]), customer.value, tag_optional.value, description.value)
+        cursor.execute(insert_query)
+        cnx.commit()
+        cursor.close()
+        cnx.close()
+        pn.state.notifications.info("Save succesfully!")
+    except Exception as e:
+        pn.state.notifications.error("Can NOT save ticket due to: {}".format(e))
+
+save_but.on_click(save_but_click)
+# Save ticket - End
 # Component logic - End
 
 # data = dict()
