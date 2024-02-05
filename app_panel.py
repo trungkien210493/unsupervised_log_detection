@@ -1,13 +1,11 @@
 import panel as pn
 import pandas as pd
 import os
-import gzip
 import datetime as dt
 import altair as alt
 import preprocessing
 import BASE_LOG_ANALYSE
 import nltk
-import asyncio
 from multiprocess import Pool
 from functools import partial
 pn.extension('vega')
@@ -17,19 +15,21 @@ from pyunpack import Archive
 import polars as pl
 alt.data_transformers.disable_max_rows()
 nltk.download('wordnet')
-from elasticsearch import Elasticsearch
 import mysql.connector
 from datasource import es_connection, ticket_db, num_core, pattern_dict, data_path, MAX_SIZE_MB
-from multiprocesspandas import applyparallel
 import re
 import urllib3
 import syslog_rust
 urllib3.disable_warnings()
+import multiprocessing
+from rich.progress import track
 
 # Global variable
 verify_data = None
 entropy = dict()
 vectorizer = None
+regex_dict = dict()
+template_id_df = None
 # UI components - Start
 # Sidebar
 file_input = pn.widgets.FileInput(accept='.tar,.tar.gz,.zip,.rar,.tgz')
@@ -94,12 +94,14 @@ test_but = pn.widgets.Button(name='Test', sizing_mode='scale_width', align='end'
 filter_file = pn.widgets.CheckBoxGroup(
     name='Log files', options=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
     value=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
-    inline=True
+    inline=True,
+    align='end'
 )
-check_kb_but = pn.widgets.Button(name="Check")
+check_kb_but = pn.widgets.Button(name="Check", align='end')
+check_kb_time = pn.widgets.DatetimeRangePicker(name="Time filter", align='end')
 show_kb = pn.widgets.Tabulator(styles={"font-size": "10pt"}, sizing_mode="stretch_both", margin=5, pagination=None)
 kb_tab = pn.Column(
-    pn.Row(filter_file, check_kb_but),
+    pn.Row(filter_file, check_kb_time, check_kb_but),
     show_kb
 )
 # Check KB tab - End
@@ -107,9 +109,10 @@ kb_tab = pn.Column(
 filter_file_pattern = pn.widgets.CheckBoxGroup(
     name='Log files', options=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
     value=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
-    inline=True
+    inline=True,
+    align='end'
 )
-get_data_but = pn.widgets.Button(name="Get data")
+get_data_but = pn.widgets.Button(name="Get log pattern", align='end')
 count_template_id = alt.Chart(pd.DataFrame({'timestamp': [], 'count': [], 'template_id': []})).mark_line().encode(
     x='timestamp',
     y='count',
@@ -129,8 +132,9 @@ show_log_pattern = pn.widgets.Tabulator(styles={"font-size": "9pt"},
                                         sizing_mode="stretch_both", 
                                         hidden_columns=['index'],
                                         min_width=800, pagination=None,)
+filter_time_log_pattern = pn.widgets.DatetimeRangePicker(name="Time filter", align='end')
 log_pattern_tab = pn.Column(
-    pn.Row(filter_file_pattern, get_data_but),
+    pn.Row(filter_file_pattern, filter_time_log_pattern, get_data_but),
     pn.Row(count_panel, show_log_pattern)
 )
 # Log pattern tab - End
@@ -262,9 +266,9 @@ def training_data(folder, start, end):
 
 def speed_up_split(filtered_data, vectorizer, entropy):
     if len(filtered_data[1]) == 0:
-        return {'timestamp': filtered_data[0].to_datetime64(), 'score': 0}
+        return {'timestamp': filtered_data[0].to_pydatetime(), 'score': 0}
     else:
-        return {'timestamp': filtered_data[0].to_datetime64(), 'score': preprocessing.calculate_score({'message': filtered_data[1]}, vectorizer, entropy)['message']}
+        return {'timestamp': filtered_data[0].to_pydatetime(), 'score': preprocessing.calculate_score({'message': filtered_data[1]}, vectorizer, entropy)['message']}
 
 def testing_data(folder, start, end):
     global entropy, vectorizer, num_core, verify_data
@@ -329,18 +333,113 @@ def filtered_score(selection):
     if not selection:
         pass
     else:
-        s1 = dt.datetime.fromtimestamp(selection['timestamp'][0]/1000)
-        e1 = dt.datetime.fromtimestamp(selection['timestamp'][1]/1000)
-        s2 = dt.datetime.utcfromtimestamp(selection['timestamp'][0]/1000)
-        e2 = dt.datetime.utcfromtimestamp(selection['timestamp'][1]/1000)
-        show_log.value = inspect_data(str(s1), str(e1))
-        filter_score = score_chart.data[(score_chart.data['timestamp'] >= str(s2)) & (score_chart.data['timestamp'] < str(e2))].copy()
-        # Hack to convert timestamp to show as localtime
-        filter_score['timestamp'] = filter_score['timestamp'].dt.tz_localize('America/Creston')
+        s = dt.datetime.fromtimestamp(selection['timestamp'][0]/1000)
+        e = dt.datetime.fromtimestamp(selection['timestamp'][1]/1000)
+        show_log.value = inspect_data(str(s), str(e))
+        filter_score = score_chart.data[(score_chart.data['timestamp'] >= str(s)) & (score_chart.data['timestamp'] < str(e))].copy()
+        filter_score['timestamp'] = filter_score['timestamp'].dt.tz_localize(None)
         error.value = filter_score[filter_score['score'] > threshold.value]
 
 pn.bind(filtered_score, score_panel.selection.param.brush, watch=True)
 # Analysis tab - End
+# Check KB tab - Start
+
+def find_kb(row):
+    global pattern_dict
+    for kb_id, regex_pattern in pattern_dict.items():
+        if re.match('.*{}.*'.format(regex_pattern), row):
+            return kb_id
+    return None
+
+def parallel_apply(function, column):
+    global num_core
+    with multiprocessing.get_context("fork").Pool(num_core) as pool:
+        return pl.Series(pool.imap(function, track(column)))
+
+def check_kb_click(event):
+    load_display('on')
+    process_files = []
+    for filterd in filter_file.value:
+        process_files += BASE_LOG_ANALYSE.get_file_list_by_filename_filter(get_saved_data_path(), filterd)
+    process_data = syslog_rust.processing_log(process_files, str(check_kb_time.value[0]), str(check_kb_time.value[1]))
+    if len(process_data) == 0:
+        pn.state.notifications.warning("There is no data in current time filter")
+    else:
+        df = pl.DataFrame(process_data).lazy()
+        df = df.with_columns(kb=pl.col("log").map_batches(lambda col: parallel_apply(find_kb, col))).collect()
+        df = df.filter(pl.col('kb').is_not_null())
+        if len(df) > 0:
+            show_kb.value = df.to_pandas()[['kb', 'time', 'filename', 'log']]
+        else:
+            show_kb.value = pd.DataFrame([{'result': 'there is no log match KB'}])
+    load_display('off')
+check_kb_but.on_click(check_kb_click)
+# Check KB tab - End
+# Log pattern tab - Start
+def find_template_id(row):
+    global regex_dict
+    for regex_pattern, template_id in regex_dict.items():
+        if re.match(regex_pattern, row):
+            return template_id
+    return None
+
+def get_data_click(event):
+    load_display('on')
+    # Get template from mysql
+    conn = mysql.connector.connect(
+        host=ticket_db["host"],
+        port=ticket_db["port"],
+        user=ticket_db["user"],
+        password=ticket_db["password"],
+        database="svtech_log"
+    )
+    cursor = conn.cursor()
+    cursor.execute("SELECT regex_pattern, template_id FROM template")
+    result = cursor.fetchall()
+    global regex_dict, template_id_df
+    regex_dict = {".*{}.*".format(pattern[0].replace("(", "\(").replace(')', '\)')): pattern[1] for pattern in result }
+    cursor.close()
+    conn.close()
+    process_files = []
+    for filterd in filter_file.value:
+        process_files += BASE_LOG_ANALYSE.get_file_list_by_filename_filter(get_saved_data_path(), filterd)
+    process_data = syslog_rust.processing_log(process_files, str(filter_time_log_pattern.value[0]), str(filter_time_log_pattern.value[1]))
+    if len(process_data) == 0:
+        pn.state.notifications.warning("There is no data in current time filter")
+    else:
+        df = pl.DataFrame(process_data).lazy()
+        df = df.with_columns(template_id=pl.col("log").map_batches(lambda col: parallel_apply(find_template_id, col))).collect()
+        template_id_df = df.to_pandas()
+        template_id_df.fillna({'template_id': 'Unknown'}, inplace=True)
+        template_id_df['time'] = pd.to_datetime(template_id_df['time'])
+        template_id_df['time'] = template_id_df['time'].dt.tz_localize(None)
+        template_id_df.rename(columns={"time": "timestamp"}, inplace=True)
+        # Add log
+        show_log_pattern.value = template_id_df[['timestamp', 'template_id', 'filename', 'log']]
+        # Add panel
+        template_id_df['date_hour'] = template_id_df['timestamp'].dt.to_period('H')
+        top10_template_id = template_id_df['template_id'].value_counts().nlargest(10).index
+        df_top10 = template_id_df[template_id_df['template_id'].isin(top10_template_id)]
+        top10_per_date_hour = df_top10.groupby(['date_hour', 'template_id']).size().reset_index(name='count')
+        top10_per_date_hour['date_hour'] = top10_per_date_hour['date_hour'].dt.to_timestamp()
+        top10_per_date_hour.columns = ['timestamp', 'template_id', 'count']
+        top10_per_date_hour['timestamp'] = top10_per_date_hour['timestamp'].dt.tz_localize('Asia/Ho_Chi_Minh')
+        count_template_id.data = top10_per_date_hour
+        count_panel.param.trigger('object')
+    load_display('off')
+
+get_data_but.on_click(get_data_click)
+
+def filtered_log(selection):
+    global template_id_df
+    if not selection:
+        pass
+    else:
+        s = dt.datetime.fromtimestamp(selection['timestamp'][0]/1000)
+        e = dt.datetime.fromtimestamp(selection['timestamp'][1]/1000)
+        show_log_pattern.value = template_id_df[(template_id_df['timestamp'] >= str(s)) & (template_id_df['timestamp'] < str(e))][['timestamp', 'template_id', 'filename', 'log']]
+pn.bind(filtered_log, count_panel.selection.param.brush, watch=True)
+# Log pattern tab - End
 # Component logic - End
 
 # data = dict()
