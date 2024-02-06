@@ -129,3 +129,5 @@ pattern_dict = {'KB31709': 'LUCHIP.*Display trap-info logic not initialized',
 'KB34996': 'exited on signal.*|.*clock failure',
 'KB37507': 'ECC Protect: Parity error corrected for FlexMem slices'
 }
+data_path = "/var/tmp/for_unsupervised_report"
+MAX_SIZE_MB = 200
