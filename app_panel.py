@@ -490,13 +490,14 @@ save_but.on_click(save_but_click)
 # Save ticket - End
 # Component logic - End
 
-ROUTES = {
-    "app_panel": main_page,
-}
-pn.serve(ROUTES,
-         port=3001,
-         address='0.0.0.0',
-         websocket_origin='*',
-         websocket_max_message_size=MAX_SIZE_MB*1024*1024,
-         http_server_kwargs={'max_buffer_size': MAX_SIZE_MB*1024*1024}
-        )
+# ROUTES = {
+#     "app_panel": main_page,
+# }
+# pn.serve(ROUTES,
+#          port=3001,
+#          address='0.0.0.0',
+#          websocket_origin='*',
+#          websocket_max_message_size=MAX_SIZE_MB*1024*1024,
+#          http_server_kwargs={'max_buffer_size': MAX_SIZE_MB*1024*1024}
+#         )
+main_page.servable()
