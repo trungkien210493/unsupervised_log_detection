@@ -1,9 +1,9 @@
-es_connection = {
-    "host": "10.98.100.109",
-    "port": 9200,
-    "user": "elastic",
-    "password": "juniper@123"
-}
+# es_connection = {
+#     "host": "10.98.100.109",
+#     "port": 9200,
+#     "user": "elastic",
+#     "password": "juniper@123"
+# }
 ticket_db = {
     "host": "10.98.100.107",
     "port": 3306,
@@ -130,4 +130,4 @@ pattern_dict = {'KB31709': 'LUCHIP.*Display trap-info logic not initialized',
 'KB37507': 'ECC Protect: Parity error corrected for FlexMem slices'
 }
 data_path = "/var/tmp/for_unsupervised_report"
-MAX_SIZE_MB = 200
+# MAX_SIZE_MB = 200

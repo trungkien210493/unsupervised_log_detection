@@ -16,13 +16,17 @@ import polars as pl
 alt.data_transformers.disable_max_rows()
 nltk.download('wordnet')
 import mysql.connector
-from datasource import es_connection, ticket_db, num_core, pattern_dict, data_path, MAX_SIZE_MB
+from datasource import ticket_db, num_core, pattern_dict, data_path
 import re
 import urllib3
 import syslog_rust
 urllib3.disable_warnings()
 import multiprocessing
 from rich.progress import track
+
+import networkx as nx
+import hvplot.networkx as hvnx
+import pc_input
 
 # Global variable
 verify_data = None
@@ -112,7 +116,8 @@ filter_file_pattern = pn.widgets.CheckBoxGroup(
     inline=True,
     align='end'
 )
-get_data_but = pn.widgets.Button(name="Get log pattern", align='end')
+get_data_but = pn.widgets.Button(name="Tag template ID", align='end')
+log_pattern_but = pn.widgets.Button(name="Find log pattern", align="end")
 count_template_id = alt.Chart(pd.DataFrame({'timestamp': [], 'count': [], 'template_id': []})).mark_line().encode(
     x='timestamp',
     y='count',
@@ -134,8 +139,11 @@ show_log_pattern = pn.widgets.Tabulator(styles={"font-size": "9pt"},
                                         min_width=800, pagination=None,)
 filter_time_log_pattern = pn.widgets.DatetimeRangePicker(name="Time filter", align='end')
 log_pattern_tab = pn.Column(
-    pn.Row(filter_file_pattern, filter_time_log_pattern, get_data_but),
-    pn.Row(count_panel, show_log_pattern)
+    pn.Row(filter_file_pattern, filter_time_log_pattern, get_data_but, log_pattern_but),
+    pn.Tabs(
+        ('Log template', pn.Row(count_panel, show_log_pattern)),
+        ('Log pattern', hvnx.draw(nx.empty_graph(), with_labels=True, height=600, width=1200, arrows=False, node_size=30))
+    )
 )
 # Log pattern tab - End
 # Ticket tab - Start
@@ -389,20 +397,23 @@ def find_template_id(row):
 def get_data_click(event):
     load_display('on')
     # Get template from mysql
-    conn = mysql.connector.connect(
-        host=ticket_db["host"],
-        port=ticket_db["port"],
-        user=ticket_db["user"],
-        password=ticket_db["password"],
-        database="svtech_log"
-    )
-    cursor = conn.cursor()
-    cursor.execute("SELECT regex_pattern, template_id FROM template")
-    result = cursor.fetchall()
     global regex_dict, template_id_df
-    regex_dict = {".*{}.*".format(pattern[0].replace("(", "\(").replace(')', '\)')): pattern[1] for pattern in result }
-    cursor.close()
-    conn.close()
+    try:
+        conn = mysql.connector.connect(
+            host=ticket_db["host"],
+            port=ticket_db["port"],
+            user=ticket_db["user"],
+            password=ticket_db["password"],
+            database="svtech_log"
+        )
+        cursor = conn.cursor()
+        cursor.execute("SELECT regex_pattern, template_id FROM template")
+        result = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        regex_dict = {".*{}.*".format(pattern[0].replace("(", "\(").replace(')', '\)')): pattern[1] for pattern in result }  
+    except Exception as e:
+        pn.state.notifications.error("Can't get the template due to: {}".format(e))
     process_files = []
     for filterd in filter_file.value:
         process_files += BASE_LOG_ANALYSE.get_file_list_by_filename_filter(get_saved_data_path(), filterd)
@@ -435,6 +446,53 @@ def get_data_click(event):
     load_display('off')
 
 get_data_but.on_click(get_data_click)
+
+def find_log_pattern(event):
+    load_display('on')
+    template_dict = {}
+    try:
+        conn = mysql.connector.connect(
+            host=ticket_db["host"],
+            port=ticket_db["port"],
+            user=ticket_db["user"],
+            password=ticket_db["password"],
+            database="svtech_log"
+        )
+        cursor = conn.cursor()
+        cursor.execute("SELECT template_id, template FROM template WHERE used = 1;")
+        result = cursor.fetchall()
+        for row in result:
+            template_dict[row[0]] = row[1]
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        pn.state.notifications.error("Can't get the template due to: {}".format(e))
+    global template_id_df
+    try:
+        temp_df = template_id_df[template_id_df['template_id'] != 'Unknown'][['timestamp', 'template_id']].copy(deep=True)
+        temp_df.set_index('timestamp', inplace=True)
+        count = temp_df.resample('1T').template_id.value_counts().unstack(fill_value=0)
+        count = count.asfreq('T', fill_value=0)
+        count = count.apply(lambda s: s.map(lambda x: 1 if x >= 1 else 0))
+        mapping = dict()
+        for i, value in enumerate(count.columns):
+            mapping[i] = value
+        count.columns = [x for x in range(len(count.columns))]
+        graph = pc_input.pc(count, 0.01, 'gsq', 'stable', -1, False, None)
+        graph = nx.relabel_nodes(graph, mapping)
+        graph.remove_nodes_from(list(nx.isolates(graph)))
+        for node, data in graph.nodes(data=True):
+            data['template'] = template_dict[int(node)]
+        pos = nx.layout.fruchterman_reingold_layout(graph)
+        causibility_panel = hvnx.draw(graph, pos, with_labels=True, height=600, width=1200, arrows=False, node_size=500)
+        log_pattern_tab[1].pop(1)
+        log_pattern_tab[1].extend([('Log pattern', causibility_panel)])
+    except Exception as e:
+        pn.state.notifications.error("Can't find log pattern due to: {}".format(e))
+    load_display('off')
+    
+
+log_pattern_but.on_click(find_log_pattern)
 
 def filtered_log(selection):
     global template_id_df
