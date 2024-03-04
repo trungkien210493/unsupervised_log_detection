@@ -23,10 +23,14 @@ import syslog_rust
 urllib3.disable_warnings()
 import multiprocessing
 from rich.progress import track
-
+from concurrent.futures import ThreadPoolExecutor
+from pygrok import Grok
 import networkx as nx
 import hvplot.networkx as hvnx
 import pc_input
+from bokeh.plotting import figure
+from bokeh.models import ColumnDataSource, Legend
+from bokeh.palettes import Category20
 
 # Global variable
 verify_data = None
@@ -34,6 +38,7 @@ entropy = dict()
 vectorizer = None
 regex_dict = dict()
 template_id_df = None
+parse_data = None
 # UI components - Start
 # Sidebar
 file_input = pn.widgets.FileInput(accept='.tar,.tar.gz,.zip,.rar,.tgz')
@@ -146,6 +151,24 @@ log_pattern_tab = pn.Column(
     )
 )
 # Log pattern tab - End
+# Log facility & severity & event - Start
+filter_file_fse_tab = pn.widgets.CheckBoxGroup(
+    name='Log files', options=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
+    value=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
+    inline=True,
+    align='end'
+)
+filter_time_fse_tab = pn.widgets.DatetimeRangePicker(name="Time filter", align='end')
+parse_but = pn.widgets.Button(name="Parse syslog", align='end')
+time_group = pn.widgets.Select(name='Time interval', options=['5min', '30min', '60min'], value='5min')
+attr_group = pn.widgets.Select(name='Field', options=['junos_facilityname', 'junos_severitycode', 'junos_eventname'], value='junos_facilityname')
+pnl = pn.Row(pn.pane.Bokeh(figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=700, tools='pan,wheel_zoom,box_zoom,reset')))
+fse_tab = pn.Column(
+    pn.Row(filter_file_fse_tab, filter_time_fse_tab, parse_but),
+    pn.Row(time_group, attr_group),
+    pnl
+)
+# Log facility & severity - End
 # Ticket tab - Start
 tag_name = pn.widgets.TextInput(name="Tag name")
 ticket_time = pn.widgets.DatetimeRangePicker(name="Error time")
@@ -177,6 +200,7 @@ main = pn.Tabs(
         ))),
         ('Check KB', kb_tab),
         ('Log pattern', log_pattern_tab),
+        ('Log facility & severity', fse_tab),
         ('Save ticket', ticket_tab),
 )
 # Main page
@@ -504,6 +528,110 @@ def filtered_log(selection):
         show_log_pattern.value = template_id_df[(template_id_df['timestamp'] >= str(s)) & (template_id_df['timestamp'] < str(e))][['timestamp', 'template_id', 'filename', 'log']]
 pn.bind(filtered_log, count_panel.selection.param.brush, watch=True)
 # Log pattern tab - End
+# Facility & severity & event tab - Start
+def parse_single_line_rfc5424(line):
+    if not line['log'].startswith("<"):
+        pass
+    else:
+        try:
+            res = syslog_rust.parse_syslog_rfc5424(line['log'].strip())
+            for k, v in res.items():
+                line[k] = v
+        except:
+            pass
+
+custom_pattern = {
+    'DATESTAMP_FULL': "%{MONTH} %{MONTHDAY} %{TIME} %{YEAR}",
+    'DATESTAMP_FULL2': "%{MONTH}  %{MONTHDAY} %{TIME} %{YEAR}",
+    'DATESTAMP_NOTYEAR': "%{MONTH} %{MONTHDAY} %{TIME}",
+    'JUNHOSTNAME': "[a-zA-Z0-9\_\-\[\.]{1,}",
+    'PROCESSNAME': "[a-zA-Z0-9\/\:\_\-\.]{1,}",
+    'PROCESSID': "(?<=\[)[0-9_]{1,}",
+    'FACILITYNAME': "[a-zA-Z]{1,}",
+    'SEVERITYCODE': "[0-9_]{1,}",
+    'EVENTNAME': "[a-zA-Z0-9\_]{1,}",
+    'MESSAGE': "(?<=\:\s).*"
+}
+pattern = """(%{DATESTAMP_FULL:junos_time}|%{DATESTAMP_FULL2:junos_time}|%{DATESTAMP_NOTYEAR:junos_time})  %{JUNHOSTNAME:junos_hostname} ((%{PROCESSNAME:junos_procsname}\[%{PROCESSID:junos_procsid}\]\:)|(%{PROCESSNAME:junos_procsname}\:)|(\:)) ((\%%{FACILITYNAME:junos_facilityname}\-%{SEVERITYCODE:junos_severitycode}\-%{EVENTNAME:junos_eventname}\:)|(\%%{FACILITYNAME:junos_facilityname}\-%{SEVERITYCODE:junos_severitycode}\:)|(\%%{FACILITYNAME:junos_facilityname}\-%{SEVERITYCODE:junos_severitycode}\-\:)) %{MESSAGE:junos_msg}"""
+grok = Grok(pattern, custom_patterns=custom_pattern)
+reversed_severity = {
+    '0': 'emergency',
+    '1': 'alert',
+    '2': 'critical',
+    '3': 'error',
+    '4': 'warning',
+    '5': 'notice',
+    '6': 'informational',
+    '7': 'debug'
+}
+
+def parse_pygrok(line):
+    global grok, reversed_severity
+    res = grok.match(line['log'])
+    if res is not None:
+        line['junos_facilityname'] = res['junos_facilityname']
+        line['junos_severitycode'] = reversed_severity[res['junos_severitycode']]
+        line['junos_eventname'] = res['junos_eventname']
+
+def create_figure():
+    global parse_data
+    p = figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=700, tools='pan,wheel_zoom,box_zoom,reset')
+    if parse_data is not None:
+        df = pd.DataFrame(parse_data)
+        df['time'] = pd.to_datetime(df['time'])
+        df.sort_values(by=['time'], inplace=True)
+        df['time'] = df['time'].dt.tz_localize(None)
+        df.set_index('time', inplace=True)
+        if attr_group.value in df.columns: 
+            count = df.resample(time_group.value)[attr_group.value].value_counts().unstack(fill_value=0)
+            count = count.asfreq(time_group.value, fill_value=0)
+            source = ColumnDataSource(count)
+            colors = Category20[20]
+            legend = Legend(items=[(column, [p.line(x='time', y=column, source=source, line_width=2, line_color=colors[i])]) for i, column in enumerate(count.columns) if i<20])
+            # Add the Legend to the plot
+            p.add_layout(legend, 'right')
+            p.legend.click_policy = 'hide'
+            # Customize the plot
+            p.xaxis.axis_label = 'Time'
+            p.yaxis.axis_label = 'Count'
+        else:
+            pn.state.notifications.error("There is no {} filter, please choose other".format(attr_group.value))
+    else:
+        pass
+    return pn.pane.Bokeh(p)
+
+def get_data_and_parse(event):
+    global parse_data
+    load_display('on')
+    process_files = []
+    for filterd in filter_file_fse_tab.value:
+        process_files += BASE_LOG_ANALYSE.get_file_list_by_filename_filter(get_saved_data_path(), filterd)
+    process_data = syslog_rust.processing_log(process_files, str(filter_time_fse_tab.value[0]), str(filter_time_fse_tab.value[1]))
+    if len(process_data) == 0:
+        parse_data = None
+        pn.state.notifications.warning("There is no data in current time filter")
+    else:
+        rfc5424 = False
+        for ele in process_data[0:5]:
+            if ele['log'].startswith("<"):
+                rfc5424 = True
+        if rfc5424:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                executor.map(parse_single_line_rfc5424, process_data)
+        else:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                executor.map(parse_pygrok, process_data)
+    parse_data = process_data
+    pnl[0] = create_figure()
+    load_display('off')
+
+def replace_plot(event):
+    pnl[0] = create_figure()
+    
+parse_but.on_click(get_data_and_parse)
+time_group.param.watch(replace_plot, 'value')
+attr_group.param.watch(replace_plot, 'value')
+# Facility & severity & event tab - End
 # Save ticket - Start
 def save_but_click(event):
     try:
