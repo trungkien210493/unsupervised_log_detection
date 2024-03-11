@@ -91,8 +91,8 @@ log_count_chart = alt.Chart(empty_log_count).mark_line().encode(
 ).interactive()
 
 log_count_panel = pn.pane.Vega(log_count_chart, margin=5)
-error = pn.widgets.Tabulator(sizing_mode="stretch_both", margin=5, page_size=5, pagination='remote')
-show_log = pn.widgets.Tabulator(styles={"font-size": "10pt"}, sizing_mode="stretch_both", margin=5, pagination=None)
+error = pn.widgets.Tabulator(sizing_mode="stretch_both", margin=5, page_size=5, pagination='remote', show_index=False)
+show_log = pn.widgets.Tabulator(styles={"font-size": "10pt"}, sizing_mode="stretch_both", margin=5, pagination=None, show_index=False)
 training_period = pn.widgets.DatetimeRangePicker(name="Training period", align='end')
 train_but = pn.widgets.Button(name='Train', sizing_mode='stretch_width', align='end')
 testing_period = pn.widgets.DatetimeRangePicker(name="Testing period", align='end')
@@ -108,7 +108,7 @@ filter_file = pn.widgets.CheckBoxGroup(
 )
 check_kb_but = pn.widgets.Button(name="Check", align='end')
 check_kb_time = pn.widgets.DatetimeRangePicker(name="Time filter", align='end')
-show_kb = pn.widgets.Tabulator(styles={"font-size": "10pt"}, sizing_mode="stretch_both", margin=5, pagination=None)
+show_kb = pn.widgets.Tabulator(styles={"font-size": "10pt"}, sizing_mode="stretch_both", margin=5, pagination=None, show_index=False)
 kb_tab = pn.Column(
     pn.Row(filter_file, check_kb_time, check_kb_but),
     show_kb
@@ -141,7 +141,7 @@ show_log_pattern = pn.widgets.Tabulator(styles={"font-size": "9pt"},
                                         layout='fit_data_table', 
                                         sizing_mode="stretch_both", 
                                         hidden_columns=['index'],
-                                        min_width=800, pagination=None,)
+                                        min_width=800, pagination=None, show_index=False)
 filter_time_log_pattern = pn.widgets.DatetimeRangePicker(name="Time filter", align='end')
 log_pattern_tab = pn.Column(
     pn.Row(filter_file_pattern, filter_time_log_pattern, get_data_but, log_pattern_but),
