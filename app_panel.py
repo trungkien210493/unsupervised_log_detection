@@ -11,7 +11,6 @@ from functools import partial
 pn.extension('vega')
 pn.extension('tabulator')
 pn.extension(notifications=True)
-from pyunpack import Archive
 import polars as pl
 alt.data_transformers.disable_max_rows()
 nltk.download('wordnet')
@@ -31,6 +30,7 @@ import pc_input
 from bokeh.plotting import figure
 from bokeh.models import ColumnDataSource, Legend
 from bokeh.palettes import Category20
+import subprocess
 
 # Global variable
 verify_data = None
@@ -172,7 +172,7 @@ fse_tab = pn.Column(
 # Ticket tab - Start
 tag_name = pn.widgets.TextInput(name="Tag name")
 ticket_time = pn.widgets.DatetimeRangePicker(name="Error time")
-customer = pn.widgets.Select(name="Customer", options=['viettel', 'metfone', 'unitel', 'movitel', 'nnpt', 'mobifone', 'cmc', 'natcom', 'ftel'])
+customer = pn.widgets.Select(name="Customer", options=['viettel', 'metfone', 'unitel', 'movitel', 'vnpt', 'mobifone', 'cmc', 'natcom', 'ftel'])
 tag_optional = pn.widgets.TextInput(name="Optional tag")
 description = pn.widgets.TextAreaInput(name="Description", height=200)
 save_but = pn.widgets.Button(name="Save")
@@ -186,6 +186,27 @@ ticket_tab = pn.Column(
     width=1500
 )
 # Ticket tab - End
+# View raw log - Start
+filter_file_raw_log = pn.widgets.CheckBoxGroup(
+    name='Log files', options=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
+    value=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
+    inline=True,
+    align='end'
+)
+header_filter = {
+    'filename': {'type': 'list', 'func': 'in', 'valuesLookup': True, 'sort': 'asc', 'multiselect': True},
+    'time': {'type': 'input', 'func': 'like'},
+    'log': {'type': 'input', 'func': 'like'}
+}
+raw_log_table = pn.widgets.Tabulator(styles={"font-size": "9pt"}, layout='fit_data_table', sizing_mode="stretch_both", 
+                                     min_width=800, pagination=None, show_index=False, header_filters=header_filter)
+filter_time_raw_log = pn.widgets.DatetimeRangePicker(name="Time filter", align='end')
+filter_rawlog_but = pn.widgets.Button(name="Get data", align='end')
+raw_log_tab = pn.Column(
+    pn.Row(filter_file_raw_log, filter_time_raw_log, filter_rawlog_but),
+    raw_log_table
+)
+# View raw log - End
 
 main = pn.Tabs(
         ('Analysis', pn.Column(
@@ -201,6 +222,7 @@ main = pn.Tabs(
         ('Check KB', kb_tab),
         ('Log pattern', log_pattern_tab),
         ('Log facility & severity', fse_tab),
+        ('View raw log', raw_log_tab),
         ('Save ticket', ticket_tab),
 )
 # Main page
@@ -249,7 +271,13 @@ def reset(event):
         except Exception as e:
             pn.state.notifications.error("Error to create directory inside extracted directory", duration=2000)
     try:
-        Archive(path).extractall(os.path.join(extract_path, file_name))
+        # Archive(path).extractall(os.path.join(extract_path, file_name))
+        if 'rar' in file_input.filename:
+            subprocess.run("unar -f {} -o {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=True)
+        elif 'zip' in file_input.filename:
+            subprocess.run("unzip -o {} -d {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=True)
+        else:
+            subprocess.run("tar zxf {} -C {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=True)
         pn.state.notifications.info('Extract file done.', duration=2000)
     except:
         pn.state.notifications.error("Extract error! Check your upload file or contact admin", duration=2000)
@@ -345,7 +373,10 @@ def train_but_click(event):
 
 def test_but_click(event):
     load_display('on')
-    testing_data(get_saved_data_path(), str(testing_period.value[0]), str(testing_period.value[1]))
+    if (testing_period.value[1] - testing_period.value[0]).days < 3:
+        testing_data(get_saved_data_path(), str(testing_period.value[0]), str(testing_period.value[1]))
+    else:
+        pn.state.notifications.error('The testing period need to be less than 3 days')
     load_display('off')
 
 train_but.on_click(train_but_click)
@@ -441,32 +472,35 @@ def get_data_click(event):
     process_files = []
     for filterd in filter_file.value:
         process_files += BASE_LOG_ANALYSE.get_file_list_by_filename_filter(get_saved_data_path(), filterd)
-    process_data = syslog_rust.processing_log(process_files, str(filter_time_log_pattern.value[0]), str(filter_time_log_pattern.value[1]))
-    if len(process_data) == 0:
-        pn.state.notifications.warning("There is no data in current time filter")
+    if (filter_time_log_pattern.value[1] - filter_time_log_pattern.value[0]).days < 3:
+        process_data = syslog_rust.processing_log(process_files, str(filter_time_log_pattern.value[0]), str(filter_time_log_pattern.value[1]))
+        if len(process_data) == 0:
+            pn.state.notifications.warning("There is no data in current time filter")
+        else:
+            try:
+                df = pl.DataFrame(process_data).lazy()
+                df = df.with_columns(template_id=pl.col("log").map_batches(lambda col: parallel_apply(find_template_id, col))).collect()
+                template_id_df = df.to_pandas()
+                template_id_df.fillna({'template_id': 'Unknown'}, inplace=True)
+                template_id_df['time'] = pd.to_datetime(template_id_df['time'])
+                template_id_df['time'] = template_id_df['time'].dt.tz_localize(None)
+                template_id_df.rename(columns={"time": "timestamp"}, inplace=True)
+                # Add log
+                show_log_pattern.value = template_id_df[['timestamp', 'template_id', 'filename', 'log']]
+                # Add panel
+                template_id_df['date_hour'] = template_id_df['timestamp'].dt.to_period('H')
+                top10_template_id = template_id_df['template_id'].value_counts().nlargest(10).index
+                df_top10 = template_id_df[template_id_df['template_id'].isin(top10_template_id)]
+                top10_per_date_hour = df_top10.groupby(['date_hour', 'template_id']).size().reset_index(name='count')
+                top10_per_date_hour['date_hour'] = top10_per_date_hour['date_hour'].dt.to_timestamp()
+                top10_per_date_hour.columns = ['timestamp', 'template_id', 'count']
+                top10_per_date_hour['timestamp'] = top10_per_date_hour['timestamp'].dt.tz_localize('Asia/Ho_Chi_Minh')
+                count_template_id.data = top10_per_date_hour
+                count_panel.param.trigger('object')
+            except Exception as e:
+                pn.state.notifications.error("Tag template id error due to: {}".format(e))
     else:
-        try:
-            df = pl.DataFrame(process_data).lazy()
-            df = df.with_columns(template_id=pl.col("log").map_batches(lambda col: parallel_apply(find_template_id, col))).collect()
-            template_id_df = df.to_pandas()
-            template_id_df.fillna({'template_id': 'Unknown'}, inplace=True)
-            template_id_df['time'] = pd.to_datetime(template_id_df['time'])
-            template_id_df['time'] = template_id_df['time'].dt.tz_localize(None)
-            template_id_df.rename(columns={"time": "timestamp"}, inplace=True)
-            # Add log
-            show_log_pattern.value = template_id_df[['timestamp', 'template_id', 'filename', 'log']]
-            # Add panel
-            template_id_df['date_hour'] = template_id_df['timestamp'].dt.to_period('H')
-            top10_template_id = template_id_df['template_id'].value_counts().nlargest(10).index
-            df_top10 = template_id_df[template_id_df['template_id'].isin(top10_template_id)]
-            top10_per_date_hour = df_top10.groupby(['date_hour', 'template_id']).size().reset_index(name='count')
-            top10_per_date_hour['date_hour'] = top10_per_date_hour['date_hour'].dt.to_timestamp()
-            top10_per_date_hour.columns = ['timestamp', 'template_id', 'count']
-            top10_per_date_hour['timestamp'] = top10_per_date_hour['timestamp'].dt.tz_localize('Asia/Ho_Chi_Minh')
-            count_template_id.data = top10_per_date_hour
-            count_panel.param.trigger('object')
-        except Exception as e:
-            pn.state.notifications.error("Tag template id error due to: {}".format(e))
+        pn.state.notifications.error('The testing period need to be less than 3 days')
     load_display('off')
 
 get_data_but.on_click(get_data_click)
@@ -632,6 +666,22 @@ parse_but.on_click(get_data_and_parse)
 time_group.param.watch(replace_plot, 'value')
 attr_group.param.watch(replace_plot, 'value')
 # Facility & severity & event tab - End
+# View raw log - Start
+def filter_raw_log(event):
+    load_display('on')
+    process_files = []
+    for filterd in filter_file_raw_log.value:
+        process_files += BASE_LOG_ANALYSE.get_file_list_by_filename_filter(get_saved_data_path(), filterd)
+    process_data = syslog_rust.processing_log(process_files, str(filter_time_raw_log.value[0]), str(filter_time_raw_log.value[1]))
+    if len(process_data) == 0:
+        pn.state.notifications.warning("There is no data in current time filter")
+    else:
+        df = pd.DataFrame(process_data)[['filename', 'time', 'log']]
+        raw_log_table.value = df
+    load_display('off')
+        
+filter_rawlog_but.on_click(filter_raw_log)
+# View raw log - End
 # Save ticket - Start
 def save_but_click(event):
     try:
