@@ -114,5 +114,7 @@ pattern_dict = {'KB31709': 'LUCHIP.*Display trap-info logic not initialized',
 'KB37050': '.*ECC single bit parity error',
 'KB35999': 'PHY stream.*to drain',
 'KB34996': 'exited on signal.*|.*clock failure',
-'KB37507': 'ECC Protect: Parity error corrected for FlexMem slices'
+'KB37507': 'ECC Protect: Parity error corrected for FlexMem slices',
+'KB37331': 'TPCI PIO Read errors seen in last second',
+'KB30474': 'CHASSISD_I2CS_READBACK_ERROR: Readback error from I2C slave for FPC'
 }
