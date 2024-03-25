@@ -127,7 +127,25 @@ pattern_dict = {'KB31709': 'LUCHIP.*Display trap-info logic not initialized',
 'KB37050': '.*ECC single bit parity error',
 'KB35999': 'PHY stream.*to drain',
 'KB34996': 'exited on signal.*|.*clock failure',
-'KB37507': 'ECC Protect: Parity error corrected for FlexMem slices'
+'KB37507': 'ECC Protect: Parity error corrected for FlexMem slices',
+'TSB74336':'(Machine check events loggedkernel.*Machine check events logged|CPU_CMERROR_DDR_CORRECTABLE_MINOR)',
+'KB37331': 'TPCI PIO Read errors seen in last second',
+'KB30474': 'CHASSISD_I2CS_READBACK_ERROR: Readback error from I2C slave for FPC',
+'KB78259': 'FI: Cell underflow errors with reorder engine pointers stalled',
+'KB78191': 'XQSS_CMERROR_CPQW_ERR_INT_FSET_LP_RD_ERR',
+'KB72383': 'LUCHIP.*LKUP_ASIC_SINGLE_BIT_ECC',
+'KB70778': 'MQSS.*: DRD.* Protect: Multiple Errors',
+'KB77691': 'LKUP_ASIC_HSL2_MAJOR_CRC_ERROR',
+'KB77156': 'MQSS_CMERROR_DRD_UNROLL_SRAM_PAR_PROTECT_FSET_REG_DETECTED_TO_CPQW_FIFO_LOW',
+'KB77455': 'MQSS_CMERROR_MALLOC_SRAM_ECC_PROTECT_FSET_REG_CORRECTED_ALLOC_PFB_MEM0',
+'KB76334': 'MQSS_CMERROR_FO_MEM_PAR_PROTECT_FSET_REG_DETECTED_OBUF_DATA',
+'KB77470': 'MQSS_CMERROR_DRD_TOP_ECC2_PROTECT_FSET_REG_CORRECTED_FL_FIFO_MEM0',
+'KB76675': 'EACHIP_CMERROR_HMCIF_RX_ECC1_PROTECT_FSET_REG_CORRECTED_FO_CHKSUM_IDX',
+'KB72915': 'MQSS.* FI: Protect: Parity error detected for timer SRAM',
+'KB75988': 'XMCHIP.*: XMCHIP.*: DRD.*: Command sequence error',
+'KB75209': 'FI_PROTECT: .* Parity error for .* Freepool SRAM',
+'KB75103': 'MQSS_CMERROR_CPQF_SRAM_PAR_PROTECT_FSET_REG_DETECTED_PFBE',
+'KB70266': 'EACHIP_CMERROR_XIF_MQSS_PAR_PROTECT_FSET_REG_DETECTED_OCM'
 }
 data_path = "/var/tmp/for_unsupervised_report"
 # MAX_SIZE_MB = 200
