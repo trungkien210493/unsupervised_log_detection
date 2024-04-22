@@ -32,6 +32,7 @@ from bokeh.models import ColumnDataSource, Legend
 from bokeh.palettes import Category20
 import subprocess
 
+pn.extension(nthreads=4)
 # Global variable
 verify_data = None
 entropy = dict()
@@ -261,26 +262,29 @@ def reset(event):
         except Exception as e:
             pn.state.notifications.error("Can't create the directory to store extracted data", duration=2000)
     # Save file upload
-    path = os.path.join(upload_path, file_input.filename)
-    file_input.save(path)
-    # Extract file upload
-    file_name, file_extension = os.path.splitext(file_input.filename)
-    if not os.path.exists(os.path.join(extract_path, file_name)):
+    if re.match(r'^[\w\-.]+$', file_input.filename):
+        path = os.path.join(upload_path, file_input.filename)
+        file_input.save(path)
+        # Extract file upload
+        file_name, file_extension = os.path.splitext(file_input.filename)
+        if not os.path.exists(os.path.join(extract_path, file_name)):
+            try:
+                os.makedirs(os.path.join(extract_path, file_name))
+            except Exception as e:
+                pn.state.notifications.error("Error to create directory inside extracted directory", duration=2000)
         try:
-            os.makedirs(os.path.join(extract_path, file_name))
-        except Exception as e:
-            pn.state.notifications.error("Error to create directory inside extracted directory", duration=2000)
-    try:
-        # Archive(path).extractall(os.path.join(extract_path, file_name))
-        if 'rar' in file_input.filename:
-            subprocess.run("unar -f {} -o {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=True)
-        elif 'zip' in file_input.filename:
-            subprocess.run("unzip -o {} -d {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=True)
-        else:
-            subprocess.run("tar zxf {} -C {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=True)
-        pn.state.notifications.info('Extract file done.', duration=2000)
-    except:
-        pn.state.notifications.error("Extract error! Check your upload file or contact admin", duration=2000)
+            # Archive(path).extractall(os.path.join(extract_path, file_name))
+            if 'rar' in file_input.filename:
+                subprocess.run("unar -f {} -o {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=True)
+            elif 'zip' in file_input.filename:
+                subprocess.run("unzip -o {} -d {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=True)
+            else:
+                subprocess.run("tar zxf {} -C {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=True)
+            pn.state.notifications.info('Extract file done.', duration=2000)
+        except:
+            pn.state.notifications.error("Extract error! Check your upload file or contact admin", duration=2000)
+    else:
+        pn.state.notifications.error("Invalid file name, accept only [a-zA-Z0-9.-_]", duration=2000)
     
 file_input.jscallback(
     args={"progress": progress},
