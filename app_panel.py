@@ -31,6 +31,7 @@ from bokeh.plotting import figure
 from bokeh.models import ColumnDataSource, Legend
 from bokeh.palettes import Category20
 import subprocess
+from datetime import datetime, timedelta
 
 pn.extension(nthreads=4)
 # Global variable
@@ -205,11 +206,50 @@ filter_time_raw_log = pn.widgets.DatetimeRangePicker(name="Time filter", align='
 filter_rawlog_but = pn.widgets.Button(name="Get data", align='end')
 raw_log_tab = pn.Column(
     pn.Row(filter_file_raw_log, filter_time_raw_log, filter_rawlog_but),
+    pn.pane.Bokeh(figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=200, tools='pan,wheel_zoom,box_zoom,reset')),
     raw_log_table
+)
+suggest_filter = pn.widgets.Select(name='Type', options=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
+                                   value='message*')
+suggest_file = pn.widgets.Select(name="File")
+single_file_table = pn.widgets.Tabulator(styles={"font-size": "9pt"}, layout='fit_data_table', sizing_mode="stretch_both", 
+                                     min_width=800, pagination=None, show_index=False, header_filters=header_filter)
+single_file_tab = pn.Column(
+    pn.Row(suggest_filter, suggest_file),
+    pn.pane.Bokeh(figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=200, tools='pan,wheel_zoom,box_zoom,reset')),
+    single_file_table
+)
+
+def load_suggest_file(event):
+    process_files = []
+    process_files += BASE_LOG_ANALYSE.get_file_list_by_filename_filter(get_saved_data_path(), suggest_filter.value)
+    suggest_file.options = process_files
+
+def load_single_file_info(event):
+    now = datetime.now()
+    last10y = now - timedelta(weeks=520)
+    process_data = syslog_rust.processing_log([suggest_file.value], last10y.strftime('%Y-%m-%d %H:%M:%S'), now.strftime('%Y-%m-%d %H:%M:%S'))
+    df = pd.DataFrame(process_data)[['filename', 'time', 'log']]
+    single_file_table.value = df
+    p = figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=200, tools='pan,wheel_zoom,box_zoom,reset')
+    df['time'] = pd.to_datetime(df['time'])
+    df.sort_values(by=['time'], inplace=True)
+    df['time'] = df['time'].dt.tz_localize(None)
+    df.set_index('time', inplace=True)
+    resampled_df = df.resample('60T').count()
+    p.vbar(x='time', top='log', source=ColumnDataSource(resampled_df), width=0.9)
+    single_file_tab[1] = pn.pane.Bokeh(p)
+
+suggest_filter.param.watch(load_suggest_file, 'value')
+suggest_file.param.watch(load_single_file_info, 'value')
+raw_tab = pn.Tabs(
+    ('Single file', single_file_tab),
+    ('Multiple files', raw_log_tab)
 )
 # View raw log - End
 
 main = pn.Tabs(
+        ('View raw log', raw_tab),
         ('Analysis', pn.Column(
             pn.Row(training_period, train_but, testing_period, test_but, threshold),
             pn.GridBox(ncols=2, nrows=2,
@@ -223,7 +263,6 @@ main = pn.Tabs(
         ('Check KB', kb_tab),
         ('Log pattern', log_pattern_tab),
         ('Log facility & severity', fse_tab),
-        ('View raw log', raw_log_tab),
         ('Save ticket', ticket_tab),
 )
 # Main page
@@ -281,6 +320,9 @@ def reset(event):
             else:
                 subprocess.run("tar zxf {} -C {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=True)
             pn.state.notifications.info('Extract file done.', duration=2000)
+            process_files = []
+            process_files += BASE_LOG_ANALYSE.get_file_list_by_filename_filter(get_saved_data_path(), suggest_filter.value)
+            suggest_file.options = process_files
         except:
             pn.state.notifications.error("Extract error! Check your upload file or contact admin", duration=2000)
     else:
@@ -682,6 +724,14 @@ def filter_raw_log(event):
     else:
         df = pd.DataFrame(process_data)[['filename', 'time', 'log']]
         raw_log_table.value = df
+        p = figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=200, tools='pan,wheel_zoom,box_zoom,reset')
+        df['time'] = pd.to_datetime(df['time'])
+        df.sort_values(by=['time'], inplace=True)
+        df['time'] = df['time'].dt.tz_localize(None)
+        df.set_index('time', inplace=True)
+        resampled_df = df.resample('60T').count()
+        p.vbar(x='time', top='log', source=ColumnDataSource(resampled_df), width=0.9)
+        raw_log_tab[1] = pn.pane.Bokeh(p)
     load_display('off')
         
 filter_rawlog_but.on_click(filter_raw_log)
