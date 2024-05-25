@@ -28,7 +28,7 @@ import networkx as nx
 import hvplot.networkx as hvnx
 import pc_input
 from bokeh.plotting import figure
-from bokeh.models import ColumnDataSource, Legend
+from bokeh.models import ColumnDataSource, Legend, DatetimeTickFormatter
 from bokeh.palettes import Category20
 import subprocess
 from datetime import datetime, timedelta
@@ -164,7 +164,7 @@ filter_time_fse_tab = pn.widgets.DatetimeRangePicker(name="Time filter", align='
 parse_but = pn.widgets.Button(name="Parse syslog", align='end')
 time_group = pn.widgets.Select(name='Time interval', options=['5min', '30min', '60min'], value='5min')
 attr_group = pn.widgets.Select(name='Field', options=['junos_facilityname', 'junos_severitycode', 'junos_eventname'], value='junos_facilityname')
-pnl = pn.Row(pn.pane.Bokeh(figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=700, tools='pan,wheel_zoom,box_zoom,reset')))
+pnl = pn.Row(pn.pane.Bokeh(figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=700, tools='pan,xwheel_zoom,box_zoom,reset')))
 fse_tab = pn.Column(
     pn.Row(filter_file_fse_tab, filter_time_fse_tab, parse_but),
     pn.Row(time_group, attr_group),
@@ -206,7 +206,7 @@ filter_time_raw_log = pn.widgets.DatetimeRangePicker(name="Time filter", align='
 filter_rawlog_but = pn.widgets.Button(name="Get data", align='end')
 raw_log_tab = pn.Column(
     pn.Row(filter_file_raw_log, filter_time_raw_log, filter_rawlog_but),
-    pn.pane.Bokeh(figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=200, tools='pan,wheel_zoom,box_zoom,reset')),
+    pn.pane.Bokeh(figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=200, tools='pan,xwheel_zoom,box_zoom,reset')),
     raw_log_table
 )
 suggest_filter = pn.widgets.Select(name='Type', options=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
@@ -216,7 +216,7 @@ single_file_table = pn.widgets.Tabulator(styles={"font-size": "9pt"}, layout='fi
                                      min_width=800, pagination=None, show_index=False, header_filters=header_filter)
 single_file_tab = pn.Column(
     pn.Row(suggest_filter, suggest_file),
-    pn.pane.Bokeh(figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=200, tools='pan,wheel_zoom,box_zoom,reset')),
+    pn.pane.Bokeh(figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=200, tools='pan,xwheel_zoom,box_zoom,reset')),
     single_file_table
 )
 
@@ -231,7 +231,14 @@ def load_single_file_info(event):
     process_data = syslog_rust.processing_log([suggest_file.value], last10y.strftime('%Y-%m-%d %H:%M:%S'), now.strftime('%Y-%m-%d %H:%M:%S'))
     df = pd.DataFrame(process_data)[['filename', 'time', 'log']]
     single_file_table.value = df
-    p = figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=200, tools='pan,wheel_zoom,box_zoom,reset')
+    p = figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=200, tools='pan,xwheel_zoom,box_zoom,reset')
+    p.xaxis.formatter = DatetimeTickFormatter(
+        hours="%H:%M:%S",
+        days="%Y-%m-%d",
+        months="%Y-%m-%d",
+        years="%Y-%m-%d"
+    )
+    p.y_range.start=0
     df['time'] = pd.to_datetime(df['time'])
     df.sort_values(by=['time'], inplace=True)
     df['time'] = df['time'].dt.tz_localize(None)
@@ -655,7 +662,14 @@ def parse_pygrok(line):
 
 def create_figure():
     global parse_data
-    p = figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=700, tools='pan,wheel_zoom,box_zoom,reset')
+    p = figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=700, tools='pan,xwheel_zoom,box_zoom,reset')
+    p.xaxis.formatter = DatetimeTickFormatter(
+        hours="%H:%M:%S",
+        days="%Y-%m-%d",
+        months="%Y-%m-%d",
+        years="%Y-%m-%d"
+    )
+    p.y_range.start=0
     if parse_data is not None:
         df = pd.DataFrame(parse_data)
         df['time'] = pd.to_datetime(df['time'])
@@ -724,7 +738,14 @@ def filter_raw_log(event):
     else:
         df = pd.DataFrame(process_data)[['filename', 'time', 'log']]
         raw_log_table.value = df
-        p = figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=200, tools='pan,wheel_zoom,box_zoom,reset')
+        p = figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=200, tools='pan,xwheel_zoom,box_zoom,reset')
+        p.xaxis.formatter = DatetimeTickFormatter(
+            hours="%H:%M:%S",
+            days="%Y-%m-%d",
+            months="%Y-%m-%d",
+            years="%Y-%m-%d"
+        )
+        p.y_range.start=0
         df['time'] = pd.to_datetime(df['time'])
         df.sort_values(by=['time'], inplace=True)
         df['time'] = df['time'].dt.tz_localize(None)
