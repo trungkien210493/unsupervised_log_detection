@@ -11,6 +11,7 @@ from functools import partial
 pn.extension('vega')
 pn.extension('tabulator')
 pn.extension(notifications=True)
+pn.extension('texteditor')
 import polars as pl
 alt.data_transformers.disable_max_rows()
 nltk.download('wordnet')
@@ -172,14 +173,23 @@ fse_tab = pn.Column(
 )
 # Log facility & severity - End
 # Ticket tab - Start
-tag_name = pn.widgets.TextInput(name="Tag name")
+tag_name = pn.widgets.TextInput(name="Tag name", placeholder="Case ID")
+ticket_file = pn.widgets.MultiChoice(name="File name", options=os.listdir(os.path.join(data_path, 'file_upload')), max_items=1)
 ticket_time = pn.widgets.DatetimeRangePicker(name="Error time")
 customer = pn.widgets.Select(name="Customer", options=['viettel', 'metfone', 'unitel', 'movitel', 'vnpt', 'mobifone', 'cmc', 'natcom', 'ftel'])
-tag_optional = pn.widgets.TextInput(name="Optional tag")
-description = pn.widgets.TextAreaInput(name="Description", height=200)
+tag_optional = pn.widgets.TextInput(name="Optional tag", placeholder="Option tags e.g. KB, bgp, ospf, ...")
+description = pn.widgets.TextEditor(name="Description", height=500, width= 700, value='''
+<h1>Root cause</h1>
+Please describe why the error occur
+<h1>Impact</h1>
+Please describe which component or service are affected by this error
+<h1>Solution</h1>
+Please describe the solution to resolve this error
+''')
 save_but = pn.widgets.Button(name="Save")
 ticket_tab = pn.Column(
     tag_name,
+    ticket_file,
     ticket_time,
     customer,
     tag_optional,
@@ -257,6 +267,8 @@ raw_tab = pn.Tabs(
 
 main = pn.Tabs(
         ('View raw log', raw_tab),
+        ('Check KB', kb_tab),
+        ('Log facility & severity', fse_tab),
         ('Analysis', pn.Column(
             pn.Row(training_period, train_but, testing_period, test_but, threshold),
             pn.GridBox(ncols=2, nrows=2,
@@ -267,9 +279,7 @@ main = pn.Tabs(
                             pn.Column(pn.pane.Markdown("# Raw log"), show_log, sizing_mode="stretch_both")], 
                         sizing_mode="stretch_both"
         ))),
-        ('Check KB', kb_tab),
         ('Log pattern', log_pattern_tab),
-        ('Log facility & severity', fse_tab),
         ('Save ticket', ticket_tab),
 )
 # Main page
@@ -320,17 +330,22 @@ def reset(event):
                 pn.state.notifications.error("Error to create directory inside extracted directory", duration=2000)
         try:
             # Archive(path).extractall(os.path.join(extract_path, file_name))
+            ticket_file.options = os.listdir(upload_path)
+            ticket_file.value = [file_input.filename]
+            load_display('on')
             if 'rar' in file_input.filename:
-                subprocess.run("unar -f {} -o {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=True)
+                subprocess.run("unar -f {} -o {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=False)
             elif 'zip' in file_input.filename:
-                subprocess.run("unzip -o {} -d {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=True)
+                subprocess.run("unzip -o {} -d {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=False)
             else:
-                subprocess.run("tar zxf {} -C {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=True)
+                subprocess.run("tar zxf {} -C {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=False)
             pn.state.notifications.info('Extract file done.', duration=2000)
             process_files = []
             process_files += BASE_LOG_ANALYSE.get_file_list_by_filename_filter(get_saved_data_path(), suggest_filter.value)
             suggest_file.options = process_files
+            load_display('off')
         except:
+            load_display('off')
             pn.state.notifications.error("Extract error! Check your upload file or contact admin", duration=2000)
     else:
         pn.state.notifications.error("Invalid file name, accept only [a-zA-Z0-9.-_]", duration=2000)
@@ -737,6 +752,7 @@ def filter_raw_log(event):
         pn.state.notifications.warning("There is no data in current time filter")
     else:
         df = pd.DataFrame(process_data)[['filename', 'time', 'log']]
+        pn.state.notifications.info("Number of logs: {}".format(len(df)), duration=5000)
         raw_log_table.value = df
         p = figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=200, tools='pan,xwheel_zoom,box_zoom,reset')
         p.xaxis.formatter = DatetimeTickFormatter(
@@ -788,7 +804,7 @@ def save_but_click(event):
         insert_query = '''
         INSERT INTO ticket (file_name, tag_name, start_time, stop_time, customer, tag_optional, description)
         VALUES ('{}', '{}', '{}', '{}', '{}', '{}', '{}');
-        '''.format(file_input.filename, tag_name.value, str(ticket_time.value[0]), str(ticket_time.value[1]), customer.value, tag_optional.value, description.value)
+        '''.format(ticket_file.value[0], tag_name.value, str(ticket_time.value[0]), str(ticket_time.value[1]), customer.value, tag_optional.value, description.value)
         cursor.execute(insert_query)
         cnx.commit()
         cursor.close()
