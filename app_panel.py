@@ -174,7 +174,12 @@ fse_tab = pn.Column(
 # Log facility & severity - End
 # Ticket tab - Start
 tag_name = pn.widgets.TextInput(name="Tag name", placeholder="Case ID")
-ticket_file = pn.widgets.MultiChoice(name="File name", options=os.listdir(os.path.join(data_path, 'file_upload')), max_items=1)
+def find_file(path):
+    if os.path.exists(path):
+        return os.listdir(path)
+    else:
+        return []
+ticket_file = pn.widgets.MultiChoice(name="File name", options=find_file(os.path.join(data_path, 'file_upload')), max_items=1)
 ticket_time = pn.widgets.DatetimeRangePicker(name="Error time")
 customer = pn.widgets.Select(name="Customer", options=['viettel', 'metfone', 'unitel', 'movitel', 'vnpt', 'mobifone', 'cmc', 'natcom', 'ftel'])
 tag_optional = pn.widgets.TextInput(name="Optional tag", placeholder="Option tags e.g. KB, bgp, ospf, ...")
