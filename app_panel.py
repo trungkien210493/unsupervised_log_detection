@@ -213,6 +213,7 @@ filter_file_raw_log = pn.widgets.CheckBoxGroup(
 header_filter = {
     'filename': {'type': 'list', 'func': 'in', 'valuesLookup': True, 'sort': 'asc', 'multiselect': True},
     'time': {'type': 'input', 'func': 'like'},
+    'junos_severitycode': {'type': 'list', 'func': 'in', 'valuesLookup': True, 'sort': 'asc', 'multiselect': True},
     'log': {'type': 'input', 'func': 'like'}
 }
 raw_log_table = pn.widgets.Tabulator(styles={"font-size": "9pt"}, layout='fit_data_table', sizing_mode="stretch_both", 
