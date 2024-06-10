@@ -662,13 +662,13 @@ custom_pattern = {
 pattern = """(%{DATESTAMP_FULL:junos_time}|%{DATESTAMP_FULL2:junos_time}|%{DATESTAMP_NOTYEAR:junos_time})  %{JUNHOSTNAME:junos_hostname} ((%{PROCESSNAME:junos_procsname}\[%{PROCESSID:junos_procsid}\]\:)|(%{PROCESSNAME:junos_procsname}\:)|(\:)) ((\%%{FACILITYNAME:junos_facilityname}\-%{SEVERITYCODE:junos_severitycode}\-%{EVENTNAME:junos_eventname}\:)|(\%%{FACILITYNAME:junos_facilityname}\-%{SEVERITYCODE:junos_severitycode}\:)|(\%%{FACILITYNAME:junos_facilityname}\-%{SEVERITYCODE:junos_severitycode}\-\:)) %{MESSAGE:junos_msg}"""
 grok = Grok(pattern, custom_patterns=custom_pattern)
 reversed_severity = {
-    '0': 'emergency',
+    '0': 'emerg',
     '1': 'alert',
-    '2': 'critical',
-    '3': 'error',
+    '2': 'crit',
+    '3': 'err',
     '4': 'warning',
     '5': 'notice',
-    '6': 'informational',
+    '6': 'info',
     '7': 'debug'
 }
 
@@ -756,7 +756,22 @@ def filter_raw_log(event):
     if len(process_data) == 0:
         pn.state.notifications.warning("There is no data in current time filter")
     else:
-        df = pd.DataFrame(process_data)[['filename', 'time', 'log']]
+        rfc5424 = False
+        for ele in process_data[0:5]:
+            if ele['log'].startswith("<"):
+                rfc5424 = True
+        if rfc5424:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                executor.map(parse_single_line_rfc5424, process_data)
+        else:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                executor.map(parse_pygrok, process_data)
+        df = pd.DataFrame(process_data)
+        if 'junos_severitycode' in df.columns:
+            df = df[['filename', 'time', 'junos_severitycode', 'log']]
+            df.fillna('', inplace=True)
+        else:
+            df = df[['filename', 'time', 'log']]
         pn.state.notifications.info("Number of logs: {}".format(len(df)), duration=5000)
         raw_log_table.value = df
         p = figure(x_axis_type='datetime', title='Count vs. Time', width=1400, height=200, tools='pan,xwheel_zoom,box_zoom,reset')
@@ -770,8 +785,8 @@ def filter_raw_log(event):
         df['time'] = pd.to_datetime(df['time'])
         df.sort_values(by=['time'], inplace=True)
         df['time'] = df['time'].dt.tz_localize(None)
-        df.set_index('time', inplace=True)
-        resampled_df = df.resample('60T').count()
+        resampled_df = df.copy(deep=True).set_index('time')
+        resampled_df = resampled_df.resample('60T').count()
         p.vbar(x='time', top='log', source=ColumnDataSource(resampled_df), width=0.9)
         raw_log_tab[1] = pn.pane.Bokeh(p)
     load_display('off')
