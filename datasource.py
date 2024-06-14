@@ -145,7 +145,10 @@ pattern_dict = {'KB31709': 'LUCHIP.*Display trap-info logic not initialized',
 'KB75988': 'XMCHIP.*: XMCHIP.*: DRD.*: Command sequence error',
 'KB75209': 'FI_PROTECT: .* Parity error for .* Freepool SRAM',
 'KB75103': 'MQSS_CMERROR_CPQF_SRAM_PAR_PROTECT_FSET_REG_DETECTED_PFBE',
-'KB70266': 'EACHIP_CMERROR_XIF_MQSS_PAR_PROTECT_FSET_REG_DETECTED_OCM'
+'KB70266': 'EACHIP_CMERROR_XIF_MQSS_PAR_PROTECT_FSET_REG_DETECTED_OCM',
+'KB74110': 'MQSS.*: MQSS.*: BCMW ICM: RORD Protect: Parity error detected for .* memory - data32_log_err .* data32_log_address',
+'KB35068': 'Restart FPC .* due to NMI timeout',
+'KB36937': 'Parity error detected for the high portion of CPQW buffer'
 }
 data_path = "/var/tmp/for_unsupervised_report"
 # MAX_SIZE_MB = 200
