@@ -270,6 +270,13 @@ raw_tab = pn.Tabs(
     ('Multiple files', raw_log_tab)
 )
 # View raw log - End
+# Feedback tab - Start
+feedback_file = pn.widgets.MultiChoice(name="File name", options=find_file(os.path.join(data_path, 'file_upload')), max_items=1)
+feedback_text = pn.widgets.StaticText(name='Feedback', value='Does this app help you to localize error ?')
+feedback_radio = pn.widgets.RadioBoxGroup(name="radio-check", options=['yes', 'no'], inline=True)
+feedback_but = pn.widgets.Button(name="Save")
+feedback_tab = pn.Column(feedback_file, feedback_text, feedback_radio, feedback_but)
+# Feedback tab - End
 
 main = pn.Tabs(
         ('View raw log', raw_tab),
@@ -287,6 +294,7 @@ main = pn.Tabs(
         ))),
         ('Log pattern', log_pattern_tab),
         ('Save ticket', ticket_tab),
+        ('Feedback', feedback_tab)
 )
 # Main page
 main_page = pn.template.MaterialTemplate(
@@ -836,6 +844,42 @@ def save_but_click(event):
 
 save_but.on_click(save_but_click)
 # Save ticket - End
+# Feedback - Start
+def save_feedback_but(event):
+    try:
+        cnx = mysql.connector.connect(
+            host=ticket_db["host"],
+            port=ticket_db["port"],
+            user=ticket_db["user"],
+            password=ticket_db["password"],
+            database="svtech_log"
+        )
+        cursor = cnx.cursor()
+        table_name = 'feedback'
+        cursor.execute(f"SHOW TABLES LIKE '{table_name}'")
+        result = cursor.fetchone()
+        if not result:
+            table_creation_query = f'''
+            CREATE TABLE {table_name} (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                `file_name` text DEFAULT NULL,
+                `feedback` text DEFAULT NULL
+            )
+            '''
+            cursor.execute(table_creation_query)
+        insert_query = '''
+        INSERT INTO feedback (file_name, feedback)
+        VALUES ('{}', '{}');
+        '''.format(feedback_file.value[0], feedback_radio.value)
+        cursor.execute(insert_query)
+        cnx.commit()
+        cursor.close()
+        cnx.close()
+        pn.state.notifications.info("Save succesfully!")
+    except Exception as e:
+        pn.state.notifications.error("Can NOT save feedback due to: {}".format(e))
+feedback_but.on_click(save_feedback_but)
+# Feedback - End
 # Component logic - End
 
 # ROUTES = {
