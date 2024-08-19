@@ -24,3 +24,4 @@ pcalg==0.2.2
 scikit_learn==0.24.2
 pygrok==1.0.0
 PyMySQL==1.1.1
+SQLAlchemy==1.4.22

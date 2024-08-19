@@ -220,6 +220,10 @@ ticket_list = pn.widgets.Tabulator(load_ticket_data(), sizing_mode="stretch_both
                                        'customer': {'editable': False, 'type': 'string'},
                                        'tag_optional': {'editable': False, 'type': 'string'},
                                        'description': {'editable': False, 'type': 'string'},
+                                    }, 
+                                   header_filters={
+                                        'tag_name':  {'type': 'input', 'func': 'like'},
+                                        'file_name':  {'type': 'input', 'func': 'like'},
                                     })
 ticket_tab = pn.Column(
     ticket_list,
@@ -454,6 +458,7 @@ def reset(event):
             cursor.close()
             cnx.close()
             ticket_list.value = load_ticket_data()
+            feedback_file.options = find_file(os.path.join(data_path, 'file_upload'))
         except Exception as e:
             pn.state.notifications.error("Can NOT create ticket due to: {}".format(e))
     else:
