@@ -19,6 +19,7 @@ import mysql.connector
 from datasource import ticket_db, num_core, pattern_dict, data_path
 import re
 import urllib3
+import urllib
 import syslog_rust
 urllib3.disable_warnings()
 import multiprocessing
@@ -44,10 +45,19 @@ template_id_df = None
 parse_data = None
 # UI components - Start
 # Sidebar
+case_id = pn.widgets.TextInput(name='Case', placeholder='Enter your case id ...')
 file_input = pn.widgets.FileInput(accept='.tar,.tar.gz,.zip,.rar,.tgz')
+async def disable(x):
+    if not case_id.value.startswith('SR'):
+        file_input.disabled = True
+    else:
+        file_input.disabled = False
+
+pn.bind(disable, case_id, watch=True)
 progress = pn.indicators.Progress(active=False)
 loading = pn.indicators.LoadingSpinner(width=20, height=20, value=False, visible=False)
 sidebar = pn.layout.WidgetBox(
+    case_id,
     file_input,
     progress
 )
@@ -173,35 +183,87 @@ fse_tab = pn.Column(
 )
 # Log facility & severity - End
 # Ticket tab - Start
-tag_name = pn.widgets.TextInput(name="Tag name", placeholder="Case ID")
+def load_ticket_data():
+    encoded_password = urllib.parse.quote_plus(ticket_db["password"])
+
+    database_uri = f"mysql+pymysql://{ticket_db['user']}:{encoded_password}@{ticket_db['host']}:{ticket_db['port']}/svtech_log"
+    df = pd.read_sql_query('SELECT id, tag_name, file_name, start_time, stop_time, customer, tag_optional, description FROM ticket WHERE id > 10;', database_uri)
+    return df
+    
+tag_name = pn.widgets.TextInput(name="Tag name", placeholder="Case ID", align='end')
 def find_file(path):
     if os.path.exists(path):
         return os.listdir(path)
     else:
         return []
-ticket_file = pn.widgets.MultiChoice(name="File name", options=find_file(os.path.join(data_path, 'file_upload')), max_items=1)
+ticket_id = pn.widgets.TextInput(name="id", disabled=True)
+ticket_file = pn.widgets.TextInput(name="File name")
 ticket_time = pn.widgets.DatetimeRangePicker(name="Error time")
 customer = pn.widgets.Select(name="Customer", options=['viettel', 'metfone', 'unitel', 'movitel', 'vnpt', 'mobifone', 'cmc', 'natcom', 'ftel'])
 tag_optional = pn.widgets.TextInput(name="Optional tag", placeholder="Option tags e.g. KB, bgp, ospf, ...")
-description = pn.widgets.TextEditor(name="Description", height=500, width= 700, value='''
+description = pn.widgets.TextEditor(name="Description", height=300, width= 700, value='''
 <h1>Root cause</h1>
 Please describe why the error occur
 <h1>Impact</h1>
 Please describe which component or service are affected by this error
 <h1>Solution</h1>
 Please describe the solution to resolve this error
-''')
-save_but = pn.widgets.Button(name="Save")
+''', align='end')
+save_but = pn.widgets.Button(name="Update")
+ticket_list = pn.widgets.Tabulator(load_ticket_data(), sizing_mode="stretch_both", selectable=1, hidden_columns=['index'],
+                                   editors={
+                                       'id': {'editable': False, 'type': 'number'},
+                                       'tag_name': {'editable': False, 'type': 'string'},
+                                       'file_name': {'editable': False, 'type': 'string'},
+                                       'start_time': {'editable': False, 'type': 'string'},
+                                       'stop_time': {'editable': False, 'type': 'string'},
+                                       'customer': {'editable': False, 'type': 'string'},
+                                       'tag_optional': {'editable': False, 'type': 'string'},
+                                       'description': {'editable': False, 'type': 'string'},
+                                    }, 
+                                   header_filters={
+                                        'tag_name':  {'type': 'input', 'func': 'like'},
+                                        'file_name':  {'type': 'input', 'func': 'like'},
+                                    })
 ticket_tab = pn.Column(
-    tag_name,
-    ticket_file,
-    ticket_time,
-    customer,
-    tag_optional,
-    description,
+    ticket_list,
+    pn.Row(
+        pn.Column(ticket_id, tag_name, ticket_file, ticket_time, customer, tag_optional),
+        description,
+    ),
     save_but,
-    width=1500
+    width=1500,
+    align='end'
 )
+def click_ticket_table(event):
+    ticket_id.value = str(ticket_list.value.at[event.row, 'id'])
+    tag_name.value = ticket_list.value.at[event.row, 'tag_name']
+    ticket_file.value = ticket_list.value.at[event.row, 'file_name']
+    try:
+        ticket_time.value = (ticket_list.value.at[event.row, 'start_time'], ticket_list.value.at[event.row, 'stop_time'])
+    except:
+        ticket_time.value = None
+    if ticket_list.value.at[event.row, 'customer']:
+        customer.value = ticket_list.value.at[event.row, 'customer']
+    else:
+        customer.value = ''
+    if ticket_list.value.at[event.row, 'tag_optional']:
+        tag_optional.value = ticket_list.value.at[event.row, 'tag_optional']
+    else:
+        tag_optional.value = ''
+    if ticket_list.value.at[event.row, 'description']:
+        description.value = ticket_list.value.at[event.row, 'description']
+    else:
+        description.value = '''
+        <h1>Root cause</h1>
+        Please describe why the error occur
+        <h1>Impact</h1>
+        Please describe which component or service are affected by this error
+        <h1>Solution</h1>
+        Please describe the solution to resolve this error
+        '''
+
+ticket_list.on_click(click_ticket_table)
 # Ticket tab - End
 # View raw log - Start
 filter_file_raw_log = pn.widgets.CheckBoxGroup(
@@ -294,7 +356,8 @@ main = pn.Tabs(
         ))),
         ('Log pattern', log_pattern_tab),
         ('Save ticket', ticket_tab),
-        ('Feedback', feedback_tab)
+        ('Feedback', feedback_tab),
+        dynamic = True,
 )
 # Main page
 main_page = pn.template.MaterialTemplate(
@@ -344,8 +407,6 @@ def reset(event):
                 pn.state.notifications.error("Error to create directory inside extracted directory", duration=2000)
         try:
             # Archive(path).extractall(os.path.join(extract_path, file_name))
-            ticket_file.options = os.listdir(upload_path)
-            ticket_file.value = [file_input.filename]
             load_display('on')
             if 'rar' in file_input.filename:
                 subprocess.run("unar -f {} -o {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=False)
@@ -357,10 +418,49 @@ def reset(event):
             process_files = []
             process_files += BASE_LOG_ANALYSE.get_file_list_by_filename_filter(get_saved_data_path(), suggest_filter.value)
             suggest_file.options = process_files
-            load_display('off')
+            load_display('off')            
         except:
             load_display('off')
             pn.state.notifications.error("Extract error! Check your upload file or contact admin", duration=2000)
+        # Add to ticket
+        try:
+            cnx = mysql.connector.connect(
+                host=ticket_db["host"],
+                port=ticket_db["port"],
+                user=ticket_db["user"],
+                password=ticket_db["password"],
+                database="svtech_log",
+                auth_plugin='mysql_native_password'
+            )
+            cursor = cnx.cursor()
+            table_name = 'ticket'
+            cursor.execute(f"SHOW TABLES LIKE '{table_name}'")
+            result = cursor.fetchone()
+            if not result:
+                table_creation_query = f'''
+                CREATE TABLE {table_name} (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    `file_name` text DEFAULT NULL,
+                    `tag_name` text DEFAULT NULL,
+                    `start_time` datetime DEFAULT NULL,
+                    `stop_time` datetime DEFAULT NULL,
+                    `customer` text DEFAULT NULL,
+                    `tag_optional` text DEFAULT NULL,
+                    `description` longtext DEFAULT NULL
+                )
+                '''
+                cursor.execute(table_creation_query)
+            insert_query = '''
+            INSERT INTO ticket (tag_name, file_name) VALUES ('{}', '{}');
+            '''.format(case_id.value, file_input.filename)
+            cursor.execute(insert_query)
+            cnx.commit()
+            cursor.close()
+            cnx.close()
+            ticket_list.value = load_ticket_data()
+            feedback_file.options = find_file(os.path.join(data_path, 'file_upload'))
+        except Exception as e:
+            pn.state.notifications.error("Can NOT create ticket due to: {}".format(e))
     else:
         pn.state.notifications.error("Invalid file name, accept only [a-zA-Z0-9.-_]", duration=2000)
     
@@ -810,7 +910,8 @@ def save_but_click(event):
             port=ticket_db["port"],
             user=ticket_db["user"],
             password=ticket_db["password"],
-            database="svtech_log"
+            database="svtech_log",
+            auth_plugin='mysql_native_password'
         )
         cursor = cnx.cursor()
         table_name = 'ticket'
@@ -830,17 +931,19 @@ def save_but_click(event):
             )
             '''
             cursor.execute(table_creation_query)
-        insert_query = '''
-        INSERT INTO ticket (file_name, tag_name, start_time, stop_time, customer, tag_optional, description)
-        VALUES ('{}', '{}', '{}', '{}', '{}', '{}', '{}');
-        '''.format(ticket_file.value[0], tag_name.value, str(ticket_time.value[0]), str(ticket_time.value[1]), customer.value, tag_optional.value, description.value)
-        cursor.execute(insert_query)
+        update_query = '''
+        UPDATE ticket 
+        SET file_name = '{}', start_time = '{}', stop_time = '{}', customer = '{}', tag_optional = '{}', description = '{}', tag_name = '{}'
+        WHERE id = {};
+        '''.format(ticket_file.value, str(ticket_time.value[0]), str(ticket_time.value[1]), customer.value, tag_optional.value, description.value, tag_name.value, ticket_id.value)
+        cursor.execute(update_query)
         cnx.commit()
         cursor.close()
         cnx.close()
-        pn.state.notifications.info("Save succesfully!")
+        pn.state.notifications.info("Update succesfully!")
+        ticket_list.value = load_ticket_data()
     except Exception as e:
-        pn.state.notifications.error("Can NOT save ticket due to: {}".format(e))
+        pn.state.notifications.error("Can NOT update ticket due to: {}".format(e))
 
 save_but.on_click(save_but_click)
 # Save ticket - End
@@ -893,3 +996,4 @@ feedback_but.on_click(save_feedback_but)
 #          http_server_kwargs={'max_buffer_size': MAX_SIZE_MB*1024*1024}
 #         )
 main_page.servable()
+file_input.disabled=True
