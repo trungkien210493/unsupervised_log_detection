@@ -450,11 +450,16 @@ def reset(event):
                 )
                 '''
                 cursor.execute(table_creation_query)
-            insert_query = '''
-            INSERT INTO ticket (tag_name, file_name) VALUES ('{}', '{}');
-            '''.format(case_id.value, file_input.filename)
-            cursor.execute(insert_query)
-            cnx.commit()
+            cursor.execute('''SELECT id FROM ticket WHERE tag_name = '{}';'''.format(case_id.value))
+            res = cursor.fetchall()
+            if len(res) == 0:
+                insert_query = '''
+                INSERT INTO ticket (tag_name, file_name) VALUES ('{}', '{}');
+                '''.format(case_id.value, file_input.filename)
+                cursor.execute(insert_query)
+                cnx.commit()
+            else:
+                pass
             cursor.close()
             cnx.close()
             ticket_list.value = load_ticket_data()
