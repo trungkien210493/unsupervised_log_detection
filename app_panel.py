@@ -16,7 +16,7 @@ import polars as pl
 alt.data_transformers.disable_max_rows()
 nltk.download('wordnet')
 import mysql.connector
-from datasource import ticket_db, num_core, pattern_dict, data_path
+from datasource import ticket_db, num_core, pattern_dict, data_path, surreal_db
 import re
 import urllib3
 import urllib
@@ -34,6 +34,7 @@ from bokeh.models import ColumnDataSource, Legend, DatetimeTickFormatter
 from bokeh.palettes import Category20
 import subprocess
 from datetime import datetime, timedelta
+from surrealdb import Surreal
 
 pn.extension(nthreads=4)
 # Global variable
@@ -339,6 +340,54 @@ feedback_radio = pn.widgets.RadioBoxGroup(name="radio-check", options=['yes', 'n
 feedback_but = pn.widgets.Button(name="Save")
 feedback_tab = pn.Column(feedback_file, feedback_text, feedback_radio, feedback_but)
 # Feedback tab - End
+# Search non-pattern KB and email tab - Start
+input_search = pn.widgets.TextAreaInput(name='Search content', placeholder='Enter content to search here...',
+                                        auto_grow=True, resizable="both", max_rows=20,
+                                        sizing_mode='stretch_both')
+search_button = pn.widgets.Button(name='Search', align='start')
+result_display = pn.pane.HTML("Nothing to display", styles={
+    'background-color': '#F6F6F6'
+},sizing_mode="stretch_both")
+result_mapping = pn.widgets.Tabulator(sizing_mode="stretch_both", selectable=1, hidden_columns=['index', 'description', 'symptoms', 'solution'],
+                                      layout='fit_data_fill')
+search_tab = pn.GridSpec(sizing_mode='stretch_both')
+search_tab[:, 2:4] = result_display
+search_tab[0, :2] = pn.Row(input_search, search_button)
+search_tab[1:3, :2] = result_mapping
+
+def click_result_mapping(event):
+    result_display.object = """
+    <h1>{}</h1>
+    <h1>Title</h1>
+    {}
+    <h1>Description</h1>
+    {}
+    <h1>Symptoms</h1>
+    {}
+    <h1>Solution</h1>
+    {}
+    """.format(result_mapping.value.at[event.row, 'id'], result_mapping.value.at[event.row, 'title'],
+               result_mapping.value.at[event.row, 'description'], result_mapping.value.at[event.row, 'symptoms'],
+               result_mapping.value.at[event.row, 'solution'])
+
+result_mapping.on_click(click_result_mapping)
+async def search_surreal(event):
+    db = Surreal("ws://{}:{}/rpc".format(surreal_db['host'], surreal_db['port']))
+    await db.connect()
+    await db.signin({"user": surreal_db['user'], "pass": surreal_db['password']})
+    await db.use(surreal_db['namespace'], surreal_db['database'])
+    query = '''
+LET $query_text = "{}"; 
+LET $query_embeddings = return http::post('http://{}:8001/encode', {{ "query": $query_text }}).embedding;
+SELECT id, title, description, symptoms, solution, vector::similarity::cosine(embedded_all, $query_embeddings) AS similarity FROM kb WHERE embedded_all <|5|> $query_embeddings;
+    '''.format(input_search.value, surreal_db['host'])
+    query_result = await db.query(query)
+    if len(query_result) == 3:
+        kb_list = query_result[2]['result']
+        result_mapping.value = pd.DataFrame(kb_list)
+
+search_button.on_click(search_surreal)
+# Search non-pattern KB and email tab - End
 
 main = pn.Tabs(
         ('View raw log', raw_tab),
@@ -355,9 +404,9 @@ main = pn.Tabs(
                         sizing_mode="stretch_both"
         ))),
         ('Log pattern', log_pattern_tab),
+        ('Search non-pattern KB and email', search_tab),
         ('Save ticket', ticket_tab),
         ('Feedback', feedback_tab),
-        dynamic = True,
 )
 # Main page
 main_page = pn.template.MaterialTemplate(

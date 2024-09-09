@@ -10,6 +10,14 @@ ticket_db = {
     "user": "juniper",
     "password": "juniper@123"
 }
+surreal_db = {
+    "host": "10.98.0.172",
+    "port": 8000,
+    "user": "root",
+    "password": "juniper@123",
+    "namespace": "svtech",
+    "database": "juniper_kb"
+}
 num_core = 4
 pattern_dict = {'KB31709': 'LUCHIP.*Display trap-info logic not initialized',
 'KB32155': 'Uninitialized Read Error',
