@@ -123,9 +123,13 @@ filter_file = pn.widgets.CheckBoxGroup(
 check_kb_but = pn.widgets.Button(name="Check", align='end')
 check_kb_time = pn.widgets.DatetimeRangePicker(name="Time filter", align='end')
 show_kb = pn.widgets.Tabulator(styles={"font-size": "10pt"}, sizing_mode="stretch_both", margin=5, pagination=None, show_index=False)
+kb_file, button_download_kb = show_kb.download_menu(
+    text_kwargs={'name': 'Enter filename', 'value': 'kb.csv'},
+    button_kwargs={'name': 'Download table'}
+)
 kb_tab = pn.Column(
     pn.Row(filter_file, check_kb_time, check_kb_but),
-    show_kb
+    pn.Row(pn.Column(kb_file, button_download_kb), show_kb)
 )
 # Check KB tab - End
 # Log pattern tab - Start
