@@ -1,9 +1,9 @@
-# es_connection = {
-#     "host": "10.98.100.109",
-#     "port": 9200,
-#     "user": "elastic",
-#     "password": "juniper@123"
-# }
+es_connection = {
+    "host": "10.98.100.109",
+    "port": 9200,
+    "user": "elastic",
+    "password": "juniper@123"
+}
 ticket_db = {
     "host": "10.98.100.107",
     "port": 3306,
@@ -16,7 +16,6 @@ surreal_db = {
     "user": "root",
     "password": "juniper@123",
     "namespace": "svtech",
-    "database": "juniper_kb"
 }
 num_core = 4
 pattern_dict = {'KB31709': 'LUCHIP.*Display trap-info logic not initialized',

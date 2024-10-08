@@ -16,7 +16,7 @@ import polars as pl
 alt.data_transformers.disable_max_rows()
 nltk.download('wordnet')
 import mysql.connector
-from datasource import ticket_db, num_core, pattern_dict, data_path, surreal_db
+from datasource import ticket_db, num_core, pattern_dict, data_path, surreal_db, es_connection
 import re
 import urllib3
 import urllib
@@ -34,7 +34,8 @@ from bokeh.models import ColumnDataSource, Legend, DatetimeTickFormatter
 from bokeh.palettes import Category20
 import subprocess
 from datetime import datetime, timedelta
-from surrealdb import Surreal
+from surrealdb import SurrealHTTP, Surreal
+from elasticsearch import Elasticsearch
 
 pn.extension(nthreads=4)
 # Global variable
@@ -349,48 +350,118 @@ input_search = pn.widgets.TextAreaInput(name='Search content', placeholder='Ente
                                         auto_grow=True, resizable="both", max_rows=20,
                                         sizing_mode='stretch_both')
 search_button = pn.widgets.Button(name='Search', align='start')
-result_display = pn.pane.HTML("Nothing to display", styles={
-    'background-color': '#F6F6F6'
+radio_search = pn.widgets.RadioBoxGroup(name='Search method', options=['Fulltext search', 'Vector search'], inline=True)
+result_display = pn.pane.HTML("<h1>Match document</h1>", styles={
+    'background-color': '#F6F6F6',
+    'overflow': 'auto',
+    'font-size': '14px',
 },sizing_mode="stretch_both")
-result_mapping = pn.widgets.Tabulator(sizing_mode="stretch_both", selectable=1, hidden_columns=['index', 'description', 'symptoms', 'solution'],
-                                      layout='fit_data_fill')
+full_display = pn.pane.HTML("<h1>Email content</h1>", styles={
+    'background-color': '#F6F6F6',
+    'overflow': 'auto',
+    'font-size': '14px',
+},sizing_mode="stretch_both")
+possible_kb = pn.pane.HTML("<h1>Mentioned KB/PR in email</h1>", styles={
+    'background-color': '#F6F6F6',
+    'overflow': 'auto',
+    'font-size': '12px',
+},sizing_mode="stretch_both")
+result_mapping = pn.widgets.Tabulator(sizing_mode="stretch_both", selectable=1, hidden_columns=['index', 'content'],
+                                      layout='fit_data_fill', editors={
+                                       'id': {'editable': False, 'type': 'string'},
+                                       'score': {'editable': False, 'type': 'number'},
+                                      })
 search_tab = pn.GridSpec(sizing_mode='stretch_both')
-search_tab[:, 2:4] = result_display
-search_tab[0, :2] = pn.Row(input_search, search_button)
-search_tab[1:3, :2] = result_mapping
+search_tab[0, 2:4] = result_display
+search_tab[1, 2:4] = possible_kb
+search_tab[2:4, 2:4] = full_display
+search_tab[0, :2] = pn.Row(input_search, pn.Column(radio_search, search_button))
+search_tab[1:4, :2] = result_mapping
 
-def click_result_mapping(event):
-    result_display.object = """
-    <h1>{}</h1>
-    <h1>Title</h1>
-    {}
-    <h1>Description</h1>
-    {}
-    <h1>Symptoms</h1>
-    {}
-    <h1>Solution</h1>
-    {}
-    """.format(result_mapping.value.at[event.row, 'id'], result_mapping.value.at[event.row, 'title'],
-               result_mapping.value.at[event.row, 'description'], result_mapping.value.at[event.row, 'symptoms'],
-               result_mapping.value.at[event.row, 'solution'])
+async def click_result_mapping(event):
+    result_display.loading = True
+    full_display.loading = True
+    possible_kb.loading = True
+    result_display.object = "{}".format(result_mapping.value.at[event.row, 'content'].replace('\n', '<br>'))
+    result_display.loading = False
+    # Load full email from surreal
+    db = SurrealHTTP('http://{}:{}'.format(surreal_db['host'], surreal_db['port']), namespace=surreal_db['namespace'], database='sr_raw',
+                     username=surreal_db['user'], password=surreal_db['password'])
+    try:
+        res = await db.select('sr:{}'.format(result_mapping.value.at[event.row, 'id']))
+        if len(res) > 0:
+            full_display.object = "{}".format(res[0]['content'].replace('\n', '<br>'))
+            kb_list = re.findall(r'https://kb.*id=KB\d+', res[0]['content'])
+            pr_list = re.findall(r'https://prsearch.*id=PR\d+', res[0]['content'])
+            possible_kb.object = """
+            <h1>Mentioned KB</h1>
+            {}
+            <h1>Mentioned PR</h1>
+            {}
+            """.format("<br>".join(set(kb_list)), "<br>".join(set(pr_list)))
+    except:
+        pn.state.notifications.warning("Can't load full email from database")
+    await db.close()
+    full_display.loading = False
+    possible_kb.loading = False
 
 result_mapping.on_click(click_result_mapping)
-async def search_surreal(event):
-    db = Surreal("ws://{}:{}/rpc".format(surreal_db['host'], surreal_db['port']))
-    await db.connect()
-    await db.signin({"user": surreal_db['user'], "pass": surreal_db['password']})
-    await db.use(surreal_db['namespace'], surreal_db['database'])
-    query = '''
-LET $query_text = "{}"; 
-LET $query_embeddings = return http::post('http://{}:8001/encode', {{ "query": $query_text }}).embedding;
-SELECT id, title, description, symptoms, solution, vector::similarity::cosine(embedded_all, $query_embeddings) AS similarity FROM kb WHERE embedded_all <|5|> $query_embeddings;
-    '''.format(input_search.value, surreal_db['host'])
-    query_result = await db.query(query)
-    if len(query_result) == 3:
-        kb_list = query_result[2]['result']
-        result_mapping.value = pd.DataFrame(kb_list)
+async def search_email(event):
+    result_mapping.loading = True
+    email_result = []
+    if radio_search.value == 'Fulltext search':
+        client_es = Elasticsearch([{'host': es_connection['host'], 'port': es_connection['port']}], http_auth=('elastic', 'juniper@123'), verify_certs=False, use_ssl=True)
+        res = client_es.search(index="sr-svtech",  request_timeout=60, body={
+            "query": {
+                "match": {
+                    "context": input_search.value
+                }
+            },
+            "highlight" : {
+                "pre_tags" : ["<b>"],
+                "post_tags" : ["</b>"],
+                "fields" : {
+                "context" : {}
+                }
+            },
+            "_source": ["SR"]
+        })
+        if len(res['hits']['hits']) > 0:
+            for element in res['hits']['hits']:
+                email_result.append({
+                    "id": element['_source']['SR'],
+                    "score": element['_score'],
+                    "content": "\n".join(element['highlight']['context'])
+                })
+        else:
+            pn.state.notifications.warning("Did not match any documents", duration=2000)
+        client_es.close()
+    elif radio_search.value == 'Vector search':
+        db = Surreal("ws://{}:{}/rpc".format(surreal_db['host'], surreal_db['port']))
+        await db.connect()
+        await db.signin({"user": surreal_db['user'], "pass": surreal_db['password']})
+        await db.use(surreal_db['namespace'], 'svtech_sr')
+        query = '''
+        LET $query_text = "{}"; 
+        LET $query_embeddings = return http::post('http://{}:8001/encode', {{ "query": $query_text }}).embedding;
+        SELECT SR, content, vector::similarity::cosine(embedded_content, $query_embeddings) AS score FROM svtech_sr WHERE embedded_content <|10|> $query_embeddings;
+            '''.format(input_search.value, surreal_db['host'])
+        query_result = await db.query(query)
+        if len(query_result) == 3:
+            for element in query_result[2]['result']:
+                email_result.append({
+                    "id": element['SR'],
+                    "score": element['score'],
+                    "content": element['content']
+                })
+        else:
+            pn.state.notifications.warning("Some error when query db", duration=2000)
+    else:
+        pass
+    result_mapping.value = pd.DataFrame(email_result)
+    result_mapping.loading = False
 
-search_button.on_click(search_surreal)
+search_button.on_click(search_email)
 # Search non-pattern KB and email tab - End
 
 main = pn.Tabs(
@@ -408,7 +479,7 @@ main = pn.Tabs(
                         sizing_mode="stretch_both"
         ))),
         ('Log pattern', log_pattern_tab),
-        ('Search non-pattern KB and email', search_tab),
+        ('Search email', search_tab),
         ('Save ticket', ticket_tab),
         ('Feedback', feedback_tab),
 )
