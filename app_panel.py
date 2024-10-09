@@ -356,11 +356,6 @@ result_display = pn.pane.HTML("<h1>Match document</h1>", styles={
     'overflow': 'auto',
     'font-size': '14px',
 },sizing_mode="stretch_both")
-full_display = pn.pane.HTML("<h1>Email content</h1>", styles={
-    'background-color': '#F6F6F6',
-    'overflow': 'auto',
-    'font-size': '14px',
-},sizing_mode="stretch_both")
 possible_kb = pn.pane.HTML("<h1>Mentioned KB/PR in email</h1>", styles={
     'background-color': '#F6F6F6',
     'overflow': 'auto',
@@ -374,13 +369,17 @@ result_mapping = pn.widgets.Tabulator(sizing_mode="stretch_both", selectable=1, 
 search_tab = pn.GridSpec(sizing_mode='stretch_both')
 search_tab[0, 2:4] = result_display
 search_tab[1, 2:4] = possible_kb
+full_display = pn.pane.JSON({}, sizing_mode='stretch_both', theme='light', styles={
+    'background-color': '#F6F6F6',
+    'overflow': 'auto',
+    'font-size': '14px',
+})
 search_tab[2:4, 2:4] = full_display
 search_tab[0, :2] = pn.Row(input_search, pn.Column(radio_search, search_button))
 search_tab[1:4, :2] = result_mapping
 
 async def click_result_mapping(event):
     result_display.loading = True
-    full_display.loading = True
     possible_kb.loading = True
     result_display.object = "{}".format(result_mapping.value.at[event.row, 'content'].replace('\n', '<br>'))
     result_display.loading = False
@@ -390,7 +389,6 @@ async def click_result_mapping(event):
     try:
         res = await db.select('sr:{}'.format(result_mapping.value.at[event.row, 'id']))
         if len(res) > 0:
-            full_display.object = "{}".format(res[0]['content'].replace('\n', '<br>'))
             kb_list = re.findall(r'https://kb.*id=KB\d+', res[0]['content'])
             pr_list = re.findall(r'https://prsearch.*id=PR\d+', res[0]['content'])
             possible_kb.object = """
@@ -399,10 +397,10 @@ async def click_result_mapping(event):
             <h1>Mentioned PR</h1>
             {}
             """.format("<br>".join(set(kb_list)), "<br>".join(set(pr_list)))
+            full_display.object = res[0]['content'].split('\n')
     except:
         pn.state.notifications.warning("Can't load full email from database")
     await db.close()
-    full_display.loading = False
     possible_kb.loading = False
 
 result_mapping.on_click(click_result_mapping)
