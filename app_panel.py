@@ -535,7 +535,7 @@ def reset(event):
             elif 'zip' in file_input.filename:
                 subprocess.run("unzip -o {} -d {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=False)
             else:
-                subprocess.run("tar zxf {} -C {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=False)
+                subprocess.run("tar xf {} -C {} >/dev/null 2>&1".format(path, os.path.join(extract_path, file_name)), shell=True, check=False)
             pn.state.notifications.info('Extract file done.', duration=2000)
             process_files = []
             process_files += BASE_LOG_ANALYSE.get_file_list_by_filename_filter(get_saved_data_path(), suggest_filter.value)
