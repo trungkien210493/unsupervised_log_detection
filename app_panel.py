@@ -399,7 +399,7 @@ async def click_result_mapping(event):
             {}
             <h1>Mentioned PR</h1>
             {}
-            """.format("<br>".join(['<a href="https://kb.juniper.net/InfoCenter/index?page=content&id={}" target="_blank" rel="noopener noreferrer">{}</a>'.format(x, x) for x in set(kb_list)]), 
+            """.format("<br>".join(['<a href="https://kb.juniper.net/InfoCenter/index?page=content&id={}" target="_blank" rel="noopener noreferrer">{}</a>'.format(x, x) for x in set(kb_list).difference({'KB35593', 'KB27882', 'KB28506', 'KB21476'})]), 
                        "<br>".join(['<a href="https://prsearch.juniper.net/InfoCenter/index?page=prcontent&id={}" target="_blank" rel="noopener noreferrer">{}</a>'.format(x, x) for x in set(pr_list)]))
             full_display.object = res[0]['content'].split('\n')
     except:
