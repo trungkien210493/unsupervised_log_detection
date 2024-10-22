@@ -14,7 +14,10 @@ pn.extension(notifications=True)
 pn.extension('texteditor')
 import polars as pl
 alt.data_transformers.disable_max_rows()
-nltk.download('wordnet')
+try:
+    nltk.find('corpora/wordnet')
+except:
+    nltk.download('wordnet')
 import mysql.connector
 from datasource import ticket_db, num_core, pattern_dict, data_path, surreal_db, es_connection
 import re
@@ -367,16 +370,16 @@ result_mapping = pn.widgets.Tabulator(sizing_mode="stretch_both", selectable=1, 
                                        'score': {'editable': False, 'type': 'number'},
                                       })
 search_tab = pn.GridSpec(sizing_mode='stretch_both')
-search_tab[0, 2:4] = result_display
-search_tab[1, 2:4] = possible_kb
+search_tab[3:5, :2] = result_display
+search_tab[1:3, 1] = possible_kb
 full_display = pn.pane.JSON({}, sizing_mode='stretch_both', theme='light', styles={
     'background-color': '#F6F6F6',
     'overflow': 'auto',
     'font-size': '14px',
 })
-search_tab[2:4, 2:4] = full_display
+search_tab[:, 2:4] = full_display
 search_tab[0, :2] = pn.Row(input_search, pn.Column(radio_search, search_button))
-search_tab[1:4, :2] = result_mapping
+search_tab[1:3, 0] = result_mapping
 
 async def click_result_mapping(event):
     result_display.loading = True
@@ -389,14 +392,15 @@ async def click_result_mapping(event):
     try:
         res = await db.select('sr:{}'.format(result_mapping.value.at[event.row, 'id']))
         if len(res) > 0:
-            kb_list = re.findall(r'https://kb.*id=KB\d+', res[0]['content'])
-            pr_list = re.findall(r'https://prsearch.*id=PR\d+', res[0]['content'])
+            kb_list = re.findall(r'KB\d+', res[0]['content'])
+            pr_list = re.findall(r'PR\d+', res[0]['content'])
             possible_kb.object = """
             <h1>Mentioned KB</h1>
             {}
             <h1>Mentioned PR</h1>
             {}
-            """.format("<br>".join(set(kb_list)), "<br>".join(set(pr_list)))
+            """.format("<br>".join(['<a href="https://kb.juniper.net/InfoCenter/index?page=content&id={}" target="_blank" rel="noopener noreferrer">{}</a>'.format(x, x) for x in set(kb_list)]), 
+                       "<br>".join(['<a href="https://prsearch.juniper.net/InfoCenter/index?page=prcontent&id={}" target="_blank" rel="noopener noreferrer">{}</a>'.format(x, x) for x in set(pr_list)]))
             full_display.object = res[0]['content'].split('\n')
     except:
         pn.state.notifications.warning("Can't load full email from database")
