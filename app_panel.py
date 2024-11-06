@@ -26,7 +26,6 @@ import urllib
 import syslog_rust
 urllib3.disable_warnings()
 import multiprocessing
-from rich.progress import track
 from concurrent.futures import ThreadPoolExecutor
 from pygrok import Grok
 import networkx as nx
@@ -730,7 +729,7 @@ def find_kb(row):
 def parallel_apply(function, column):
     global num_core
     with multiprocessing.get_context("fork").Pool(num_core) as pool:
-        return pl.Series(pool.imap(function, track(column)))
+        return pl.Series(pool.imap(function, column))
 
 def check_kb_click(event):
     load_display('on')
