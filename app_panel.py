@@ -28,9 +28,7 @@ urllib3.disable_warnings()
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 from pygrok import Grok
-import networkx as nx
-import hvplot.networkx as hvnx
-import pc_input
+import gensim
 from bokeh.plotting import figure
 from bokeh.models import ColumnDataSource, Legend, DatetimeTickFormatter
 from bokeh.palettes import Category20
@@ -38,6 +36,10 @@ import subprocess
 from datetime import datetime, timedelta
 from surrealdb import SurrealHTTP, Surreal
 from elasticsearch import Elasticsearch
+import tag_template_rust
+import numpy as np
+import asyncio
+import hashlib
 
 pn.extension(nthreads=4)
 # Global variable
@@ -45,10 +47,23 @@ verify_data = None
 entropy = dict()
 vectorizer = None
 regex_dict = dict()
-template_id_df = None
 parse_data = None
+dictionary = gensim.corpora.Dictionary.load(
+    "model_26_Dec_2024/dictionary/template_dictionary.dict"
+)
+lda_model = gensim.models.LdaMulticore.load(
+    "model_26_Dec_2024/model/template_lda.model"
+)
 # UI components - Start
 # Sidebar
+def find_file(path):
+    if os.path.exists(path):
+        return os.listdir(path)
+    else:
+        return []
+    
+upload_or_select = pn.widgets.RadioBoxGroup(name="upload or select", options=['upload', 'select'], inline=True, value='upload')
+extract_direct = pn.widgets.MultiChoice(name="Host", options=find_file(os.path.join(data_path, 'extracted')), max_items=1)
 case_id = pn.widgets.TextInput(name='Case', placeholder='Enter your case id ...')
 file_input = pn.widgets.FileInput(accept='.tar,.tar.gz,.zip,.rar,.tgz')
 async def disable(x):
@@ -57,13 +72,29 @@ async def disable(x):
     else:
         file_input.disabled = False
 
+async def change_mode(x):
+    if upload_or_select.value == 'select':
+        file_input.disabled = True
+        case_id.disabled = True
+        extract_direct.disabled = False
+    else:
+        case_id.disabled = False
+        if not case_id.value.startswith('SR'):
+            file_input.disabled = True
+        else:
+            file_input.disabled = False
+        extract_direct.disabled = True
 pn.bind(disable, case_id, watch=True)
+pn.bind(change_mode, upload_or_select, watch=True)
 progress = pn.indicators.Progress(active=False)
 loading = pn.indicators.LoadingSpinner(width=20, height=20, value=False, visible=False)
 sidebar = pn.layout.WidgetBox(
+    upload_or_select,
     case_id,
     file_input,
-    progress
+    progress,
+    pn.layout.Divider(),
+    extract_direct,
 )
 
 # Main
@@ -136,40 +167,48 @@ kb_tab = pn.Column(
 )
 # Check KB tab - End
 # Log pattern tab - Start
-filter_file_pattern = pn.widgets.CheckBoxGroup(
-    name='Log files', options=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
-    value=['chassisd*', 'config-changes*', 'interactive-commands*', 'jam_chassisd*', 'message*', 'security*'],
-    inline=True,
-    align='end'
-)
-get_data_but = pn.widgets.Button(name="Tag template ID", align='end')
-log_pattern_but = pn.widgets.Button(name="Find log pattern", align="end")
-count_template_id = alt.Chart(pd.DataFrame({'timestamp': [], 'count': [], 'template_id': []})).mark_line().encode(
-    x='timestamp',
-    y='count',
-    color='template_id:N',
-    tooltip=['timestamp', 'count', 'template_id']
-).properties(
-    width=700,
-    height=720
-).add_params(
-    brush,
-    interaction
-)
-
-count_panel = pn.pane.Vega(count_template_id, margin=5, min_width=700)
-show_log_pattern = pn.widgets.Tabulator(styles={"font-size": "9pt"}, 
-                                        layout='fit_data_table', 
-                                        sizing_mode="stretch_both", 
-                                        hidden_columns=['index'],
-                                        min_width=800, pagination=None, show_index=False)
+# filter_file_pattern = pn.widgets.Select(
+#     name='Choose log files to search', options=['All log', 'Only chassisd', 'Only messages'],
+#     value=['All log'], align='end'
+# )
+get_data_but = pn.widgets.Button(name="Find similar ticket", align='end')
 filter_time_log_pattern = pn.widgets.DatetimeRangePicker(name="Time filter", align='end')
+similar_ticket_tb = pn.widgets.Tabulator(
+    sizing_mode="stretch_both",
+    selectable=1,
+    hidden_columns=["index", "log"],
+    layout="fit_data_fill",
+    editors={
+        "ticket": {"editable": False, "type": "string"},
+        "score": {"editable": False, "type": "number"},
+        "sr": {"editable": False, "type": "string"},
+    },
+)
+source_log = pn.widgets.Tabulator(
+    sizing_mode="stretch_both",
+    hidden_columns=["index"],
+    layout="fit_data_fill",
+    header_filters={
+        'filename': {'type': 'list', 'func': 'in', 'valuesLookup': True, 'sort': 'asc', 'multiselect': True},
+    }
+)
+ticket_log = pn.widgets.Tabulator(
+    sizing_mode="stretch_both",
+    hidden_columns=["index"],
+    layout="fit_data_fill",
+    header_filters={
+        'filename': {'type': 'list', 'func': 'in', 'valuesLookup': True, 'sort': 'asc', 'multiselect': True},
+    }
+)
+possible_ticket = pn.pane.HTML("<h1>Possible ticket</h1>")
+display_log_pattern = pn.GridSpec(sizing_mode='stretch_both')
+display_log_pattern[0:2, 0:6] = similar_ticket_tb
+display_log_pattern[0:2, 6:12] = possible_ticket
+display_log_pattern[2:6, 0:6] = source_log
+display_log_pattern[2:6, 6:12] = ticket_log
 log_pattern_tab = pn.Column(
-    pn.Row(filter_file_pattern, filter_time_log_pattern, get_data_but, log_pattern_but),
-    pn.Tabs(
-        ('Log template', pn.Row(count_panel, show_log_pattern)),
-        ('Log pattern', hvnx.draw(nx.empty_graph(), with_labels=True, height=600, width=1200, arrows=False, node_size=30))
-    )
+    pn.Row(filter_time_log_pattern, get_data_but),
+    display_log_pattern
 )
 # Log pattern tab - End
 # Log facility & severity & event - Start
@@ -199,11 +238,7 @@ def load_ticket_data():
     return df
     
 tag_name = pn.widgets.TextInput(name="Tag name", placeholder="Case ID", align='end')
-def find_file(path):
-    if os.path.exists(path):
-        return os.listdir(path)
-    else:
-        return []
+
 ticket_id = pn.widgets.TextInput(name="id", disabled=True)
 ticket_file = pn.widgets.TextInput(name="File name")
 ticket_time = pn.widgets.DatetimeRangePicker(name="Error time")
@@ -614,8 +649,11 @@ def load_display(x):
 def get_saved_data_path():
     global data_path
     extract_path = os.path.join(data_path, 'extracted')
-    file_name, file_extension = os.path.splitext(file_input.filename)
-    return os.path.join(extract_path, file_name)
+    if upload_or_select.value == 'upload':
+        file_name, file_extension = os.path.splitext(file_input.filename)
+        return os.path.join(extract_path, file_name)
+    else:
+        return os.path.join(extract_path, extract_direct.value[0])
     
 # Analysis tab - Start
 def training_data(folder, start, end):
@@ -733,6 +771,7 @@ def parallel_apply(function, column):
 
 def check_kb_click(event):
     load_display('on')
+    global pattern_dict, num_core
     process_files = []
     for filterd in filter_file.value:
         process_files += BASE_LOG_ANALYSE.get_file_list_by_filename_filter(get_saved_data_path(), filterd)
@@ -741,11 +780,16 @@ def check_kb_click(event):
         pn.state.notifications.warning("There is no data in current time filter")
     else:
         try:
-            df = pl.DataFrame(process_data).lazy()
-            df = df.with_columns(kb=pl.col("log").map_batches(lambda col: parallel_apply(find_kb, col))).collect()
-            df = df.filter(pl.col('kb').is_not_null())
+            list_log = list()
+            for row in process_data:
+                list_log.append(row['log'])
+            revert_kb = {v: k for k, v in pattern_dict.items()}
+            result = tag_template_rust.tag_strings(list_log, revert_kb, num_core)
+            df = pd.DataFrame(process_data)
+            df['kb'] = result
+            df.dropna(inplace=True)
             if len(df) > 0:
-                show_kb.value = df.to_pandas()[['kb', 'time', 'filename', 'log']]
+                show_kb.value = df[['kb', 'time', 'filename', 'log']]
             else:
                 show_kb.value = pd.DataFrame([{'result': 'there is no log match KB'}])
         except Exception as e:
@@ -754,6 +798,46 @@ def check_kb_click(event):
 check_kb_but.on_click(check_kb_click)
 # Check KB tab - End
 # Log pattern tab - Start
+def calculate_topic_distribution(sub_df):
+    global lda_model, dictionary
+    sub_df["template"] = sub_df["template"].str.replace("<\*>", " ")
+    sub_df["template"] = sub_df["template"].str.replace("_", " ")
+    sub_df["template"] = sub_df["template"].str.replace(
+        "Internal AS", "internal autonomous system"
+    )
+    sub_df["template"] = np.where(
+        sub_df["template"].isnull(), sub_df["log"], sub_df["template"]
+    )
+    sub_df["process_template"] = sub_df["template"].map(preprocessing.preprocess)
+    process_data = sub_df["process_template"]
+    mean_distribution = [0.0] * lda_model.num_topics
+    for doc in process_data:
+        bow = dictionary.doc2bow(doc)
+        for index, score in lda_model.get_document_topics(bow, minimum_probability=0.0):
+            mean_distribution[index] += score
+    sub_df["concat"] = sub_df["filename"] + "|" + sub_df["log"]
+    raw = sub_df["concat"].str.cat(sep="")
+    return [x / len(process_data) for x in mean_distribution], raw
+
+async def query_vector(emb, db):
+    query = """
+    LET $query_vector = {};
+    SELECT tag, vector::similarity::cosine(vector, $query_vector) AS dist, sr FROM ticket_topic WHERE vector <|1|> $query_vector;
+    """.format(
+        emb
+    )
+    res = await db.query(query)
+    tag = None
+    dist = 0
+    sr = None
+    try:
+        tag = res[1]["result"][0]["tag"]
+        dist = res[1]["result"][0]["dist"]
+        sr = res[1]["result"][0]["sr"]
+    except:
+        pass
+    return tag, dist, sr
+
 def find_template_id(row):
     global regex_dict
     for regex_pattern, template_id in regex_dict.items():
@@ -761,11 +845,13 @@ def find_template_id(row):
             return template_id
     return None
 
-def get_data_click(event):
+async def get_data_click(event):
+    await asyncio.sleep(0.25)
     load_display('on')
     # Get template from mysql
-    global regex_dict, template_id_df
+    global regex_dict, num_core
     try:
+        pn.state.notifications.info("Get template data")
         conn = mysql.connector.connect(
             host=ticket_db["host"],
             port=ticket_db["port"],
@@ -774,105 +860,110 @@ def get_data_click(event):
             database="svtech_log"
         )
         cursor = conn.cursor()
-        cursor.execute("SELECT regex_pattern, template_id FROM template")
+        cursor.execute("SELECT regex_pattern, template_id, template FROM template")
         result = cursor.fetchall()
         cursor.close()
         conn.close()
-        regex_dict = {".*{}.*".format(pattern[0].replace("(", "\(").replace(')', '\)')): pattern[1] for pattern in result }  
+        regex_dict = {".*{}.*".format(pattern[0].replace("(", "\(").replace(')', '\)')): str(pattern[1]) for pattern in result }
+        template_dict = {str(pattern[1]): pattern[2] for pattern in result}
     except Exception as e:
         pn.state.notifications.error("Can't get the template due to: {}".format(e))
+    similar_ticket_tb.loading = True
     process_files = []
-    for filterd in filter_file.value:
+    for filterd in ["chassisd*", "jam_chassisd*", "message*", "security*"]:
         process_files += BASE_LOG_ANALYSE.get_file_list_by_filename_filter(get_saved_data_path(), filterd)
     if (filter_time_log_pattern.value[1] - filter_time_log_pattern.value[0]).days < 3:
+        pn.state.notifications.info("Start to collect data")
         process_data = syslog_rust.processing_log(process_files, str(filter_time_log_pattern.value[0]), str(filter_time_log_pattern.value[1]))
         if len(process_data) == 0:
             pn.state.notifications.warning("There is no data in current time filter")
         else:
             try:
-                df = pl.DataFrame(process_data).lazy()
-                df = df.with_columns(template_id=pl.col("log").map_batches(lambda col: parallel_apply(find_template_id, col))).collect()
-                template_id_df = df.to_pandas()
-                template_id_df.fillna({'template_id': 'Unknown'}, inplace=True)
-                template_id_df['time'] = pd.to_datetime(template_id_df['time'])
-                template_id_df['time'] = template_id_df['time'].dt.tz_localize(None)
-                template_id_df.rename(columns={"time": "timestamp"}, inplace=True)
-                # Add log
-                show_log_pattern.value = template_id_df[['timestamp', 'template_id', 'filename', 'log']]
-                # Add panel
-                template_id_df['date_hour'] = template_id_df['timestamp'].dt.to_period('H')
-                top10_template_id = template_id_df['template_id'].value_counts().nlargest(10).index
-                df_top10 = template_id_df[template_id_df['template_id'].isin(top10_template_id)]
-                top10_per_date_hour = df_top10.groupby(['date_hour', 'template_id']).size().reset_index(name='count')
-                top10_per_date_hour['date_hour'] = top10_per_date_hour['date_hour'].dt.to_timestamp()
-                top10_per_date_hour.columns = ['timestamp', 'template_id', 'count']
-                top10_per_date_hour['timestamp'] = top10_per_date_hour['timestamp'].dt.tz_localize('Asia/Ho_Chi_Minh')
-                count_template_id.data = top10_per_date_hour
-                count_panel.param.trigger('object')
+                pn.state.notifications.info("Start to tag template")
+                list_log = list()
+                template = list()
+                for row in process_data:
+                    list_log.append(row["log"])
+                log_with_template = tag_template_rust.tag_strings(list_log, regex_dict, num_core)
+                for template_id in log_with_template:
+                    if template_id:
+                        template.append(template_dict[template_id])
+                    else:
+                        template.append(None)
+                df = pd.DataFrame(process_data)
+                pn.state.notifications.info("Done to tag template")
+                df['template'] = template
+                df["time"] = pd.to_datetime(df["time"])
+                df.sort_values(by=["time"], inplace=True)
+                df["time"] = df["time"].dt.tz_localize(None)
+                df["log"] = df["log"].astype(str)
+                df.set_index("time", inplace=True)
+                resampled = df.resample("60T", origin="start")
+                pn.state.notifications.info("Calculate topic distribution")
+                s = list()
+                db = SurrealHTTP('http://{}:{}'.format(surreal_db['host'], surreal_db['port']), namespace="ticket", database='ticket',
+                     username=surreal_db['user'], password=surreal_db['password'])
+                for i, (timestamp, sub_df) in enumerate(resampled):
+                    if len(sub_df) > 20:
+                        topic_dis, raw_text = calculate_topic_distribution(sub_df.copy(deep=True))
+                        tag, dist, sr = await query_vector(topic_dis, db)
+                        if dist > 0.95:
+                            s.append(
+                                {
+                                    "time": "{}".format(timestamp),
+                                    "log": raw_text,
+                                    "ticket": tag,
+                                    "score": dist,
+                                    "sr": sr,
+                                }
+                            )
+                await db.close()
+                similar_ticket_tb.value = pd.DataFrame(s)
+                pn.state.notifications.info("Done topic distribution")
+                if len(s) > 0:
+                    count_dict = dict()
+                    for item in s:
+                        if item['sr'] in count_dict:
+                            count_dict[item['sr']] += 1
+                        else:
+                            count_dict[item['sr']] = 1
+                    sorted_count = sorted(count_dict.items(), key=lambda x: x[1], reverse=True)
+                    possible_ticket.object = """<h1>Possible similar error</h1>
+                    {}
+                    <h1>Highest match: {}</h1>
+                    """.format(
+                        sorted_count, sorted_count[0]
+                    )
+                else:
+                    possible_ticket.object = "<h1>Non matching ticket</h1>"
             except Exception as e:
                 pn.state.notifications.error("Tag template id error due to: {}".format(e))
+                print(e)
     else:
         pn.state.notifications.error('The testing period need to be less than 3 days')
+    similar_ticket_tb.loading = False
     load_display('off')
 
-get_data_but.on_click(get_data_click)
+def convert_log_to_table(log):
+    res = []
+    for line in log.split("\n"):
+        token = line.split("|", 1)
+        if len(token) > 1:
+            res.append({'filename': token[0], 'log': token[1]})
+    return res
 
-def find_log_pattern(event):
-    load_display('on')
-    template_dict = {}
-    try:
-        conn = mysql.connector.connect(
-            host=ticket_db["host"],
-            port=ticket_db["port"],
-            user=ticket_db["user"],
-            password=ticket_db["password"],
-            database="svtech_log"
-        )
-        cursor = conn.cursor()
-        cursor.execute("SELECT template_id, template FROM template WHERE used = 1;")
-        result = cursor.fetchall()
-        for row in result:
-            template_dict[row[0]] = row[1]
-        cursor.close()
-        conn.close()
-    except Exception as e:
-        pn.state.notifications.error("Can't get the template due to: {}".format(e))
-    global template_id_df
-    try:
-        temp_df = template_id_df[template_id_df['template_id'] != 'Unknown'][['timestamp', 'template_id']].copy(deep=True)
-        temp_df.set_index('timestamp', inplace=True)
-        count = temp_df.resample('1T').template_id.value_counts().unstack(fill_value=0)
-        count = count.asfreq('T', fill_value=0)
-        count = count.apply(lambda s: s.map(lambda x: 1 if x >= 1 else 0))
-        mapping = dict()
-        for i, value in enumerate(count.columns):
-            mapping[i] = value
-        count.columns = [x for x in range(len(count.columns))]
-        graph = pc_input.pc(count, 0.01, 'gsq', 'stable', -1, False, None)
-        graph = nx.relabel_nodes(graph, mapping)
-        graph.remove_nodes_from(list(nx.isolates(graph)))
-        for node, data in graph.nodes(data=True):
-            data['template'] = template_dict[int(node)]
-        pos = nx.layout.fruchterman_reingold_layout(graph)
-        causibility_panel = hvnx.draw(graph, pos, with_labels=True, height=600, width=1200, arrows=False, node_size=500)
-        log_pattern_tab[1].pop(1)
-        log_pattern_tab[1].extend([('Log pattern', causibility_panel)])
-    except Exception as e:
-        pn.state.notifications.error("Can't find log pattern due to: {}".format(e))
-    load_display('off')
+async def click_ticket_table(event):
+    db = SurrealHTTP('http://{}:{}'.format(surreal_db['host'], surreal_db['port']), namespace="ticket", database='ticket',
+                     username=surreal_db['user'], password=surreal_db['password'])
+    ticket_str = str(similar_ticket_tb.value.at[event.row, "ticket"])
+    res = await db.select(
+        "ticket_topic:{}".format(hashlib.md5(ticket_str.encode('utf-8')).hexdigest())
+    )
+    source_log.value = pd.DataFrame(convert_log_to_table(similar_ticket_tb.value.at[event.row, "log"]))
+    ticket_log.value = pd.DataFrame(convert_log_to_table(res[0]["log"]))
     
-
-log_pattern_but.on_click(find_log_pattern)
-
-def filtered_log(selection):
-    global template_id_df
-    if not selection:
-        pass
-    else:
-        s = dt.datetime.fromtimestamp(selection['timestamp'][0]/1000)
-        e = dt.datetime.fromtimestamp(selection['timestamp'][1]/1000)
-        show_log_pattern.value = template_id_df[(template_id_df['timestamp'] >= str(s)) & (template_id_df['timestamp'] < str(e))][['timestamp', 'template_id', 'filename', 'log']]
-pn.bind(filtered_log, count_panel.selection.param.brush, watch=True)
+similar_ticket_tb.on_click(click_ticket_table)
+get_data_but.on_click(get_data_click)
 # Log pattern tab - End
 # Facility & severity & event tab - Start
 def parse_single_line_rfc5424(line):
@@ -1127,3 +1218,4 @@ feedback_but.on_click(save_feedback_but)
 #         )
 main_page.servable()
 file_input.disabled=True
+extract_direct.disabled = True

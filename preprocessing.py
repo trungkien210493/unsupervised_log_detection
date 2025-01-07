@@ -2,10 +2,11 @@ from sklearn.feature_extraction.text import CountVectorizer
 import pandas as pd
 import numpy as np
 import gensim
-from nltk.stem import WordNetLemmatizer, SnowballStemmer
+from nltk.stem import WordNetLemmatizer
 from nltk.stem.porter import *
 import math
 from functools import lru_cache
+import preprocessing_dict
 
 
 @lru_cache(maxsize=10000)
@@ -15,7 +16,11 @@ def lemmatize_stemming(text):
 def preprocess(text):
     result = []
     for token in gensim.utils.simple_preprocess(text):
-        result.append(lemmatize_stemming(token))
+        if token not in preprocessing_dict.specific_words:
+            result.append(lemmatize_stemming(token))
+        else:
+            for tok in gensim.utils.simple_preprocess(preprocessing_dict.specific_words[token]):
+                result.append(lemmatize_stemming(tok))
     return result
 
 def calculate_score(data, vectorizer, entropy):
