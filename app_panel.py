@@ -167,10 +167,10 @@ kb_tab = pn.Column(
 )
 # Check KB tab - End
 # Log pattern tab - Start
-# filter_file_pattern = pn.widgets.Select(
-#     name='Choose log files to search', options=['All log', 'Only chassisd', 'Only messages'],
-#     value=['All log'], align='end'
-# )
+filter_file_pattern = pn.widgets.Select(
+    name='Choose log files to search', options=['All log', 'Only chassisd', 'Only messages'],
+    value=['All log'], align='end'
+)
 get_data_but = pn.widgets.Button(name="Find similar ticket", align='end')
 filter_time_log_pattern = pn.widgets.DatetimeRangePicker(name="Time filter", align='end')
 similar_ticket_tb = pn.widgets.Tabulator(
@@ -207,7 +207,7 @@ display_log_pattern[0:2, 6:12] = possible_ticket
 display_log_pattern[2:6, 0:6] = source_log
 display_log_pattern[2:6, 6:12] = ticket_log
 log_pattern_tab = pn.Column(
-    pn.Row(filter_time_log_pattern, get_data_but),
+    pn.Row(filter_file_pattern, filter_time_log_pattern, get_data_but),
     display_log_pattern
 )
 # Log pattern tab - End
@@ -819,12 +819,12 @@ def calculate_topic_distribution(sub_df):
     raw = sub_df["concat"].str.cat(sep="")
     return [x / len(process_data) for x in mean_distribution], raw
 
-async def query_vector(emb, db):
+async def query_vector(emb, db, table):
     query = """
     LET $query_vector = {};
-    SELECT tag, vector::similarity::cosine(vector, $query_vector) AS dist, sr FROM ticket_topic WHERE vector <|1|> $query_vector;
+    SELECT tag, vector::similarity::cosine(vector, $query_vector) AS dist, sr FROM {} WHERE vector <|1|> $query_vector;
     """.format(
-        emb
+        emb, table
     )
     res = await db.query(query)
     tag = None
@@ -891,22 +891,32 @@ async def get_data_click(event):
                     else:
                         template.append(None)
                 df = pd.DataFrame(process_data)
+                table = "ticket_topic"
                 pn.state.notifications.info("Done to tag template")
                 df['template'] = template
                 df["time"] = pd.to_datetime(df["time"])
                 df.sort_values(by=["time"], inplace=True)
                 df["time"] = df["time"].dt.tz_localize(None)
                 df["log"] = df["log"].astype(str)
+                if filter_file_pattern.value == 'Only chassisd':
+                    df = df[df['filename'].str.contains('chassisd')]
+                    table = "ticket_chassisd"
+                elif filter_file_pattern.value == 'Only messages':
+                    df = df[df['filename'].str.contains('message')]
+                    table = "ticket_message"
+                else:
+                    pass
                 df.set_index("time", inplace=True)
                 resampled = df.resample("60T", origin="start")
                 pn.state.notifications.info("Calculate topic distribution")
                 s = list()
                 db = SurrealHTTP('http://{}:{}'.format(surreal_db['host'], surreal_db['port']), namespace="ticket", database='ticket',
                      username=surreal_db['user'], password=surreal_db['password'])
+                
                 for i, (timestamp, sub_df) in enumerate(resampled):
                     if len(sub_df) > 20:
                         topic_dis, raw_text = calculate_topic_distribution(sub_df.copy(deep=True))
-                        tag, dist, sr = await query_vector(topic_dis, db)
+                        tag, dist, sr = await query_vector(topic_dis, db, table)
                         if dist > 0.95:
                             s.append(
                                 {
@@ -956,8 +966,15 @@ async def click_ticket_table(event):
     db = SurrealHTTP('http://{}:{}'.format(surreal_db['host'], surreal_db['port']), namespace="ticket", database='ticket',
                      username=surreal_db['user'], password=surreal_db['password'])
     ticket_str = str(similar_ticket_tb.value.at[event.row, "ticket"])
+    table = "ticket_topic"
+    if filter_file_pattern.value == 'Only chassisd':
+        table = "ticket_chassisd"
+    elif filter_file_pattern.value == 'Only messages':
+        table = "ticket_message"
+    else:
+        pass
     res = await db.select(
-        "ticket_topic:{}".format(hashlib.md5(ticket_str.encode('utf-8')).hexdigest())
+        "{}:{}".format(table, hashlib.md5(ticket_str.encode('utf-8')).hexdigest())
     )
     source_log.value = pd.DataFrame(convert_log_to_table(similar_ticket_tb.value.at[event.row, "log"]))
     ticket_log.value = pd.DataFrame(convert_log_to_table(res[0]["log"]))
